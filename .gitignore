@@ -43,3 +43,6 @@ lib/generated/
 !.env.example
 
 .vercel
+
+# generated test documents
+/*.pdf
