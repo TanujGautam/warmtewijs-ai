@@ -63,7 +63,6 @@ export async function* runOfflineAgent(userText: string, profile: Profile): Asyn
     }
     reply = words(reply, "To make this specific to your house, what's your **postcode and house number**? (e.g. *1072 AB 14*). I'll pull the build year, type and label from the registers.");
     yield { type: "text", delta: reply };
-    yield { type: "done" };
     return;
   }
 
@@ -78,7 +77,6 @@ export async function* runOfflineAgent(userText: string, profile: Profile): Asyn
   );
   if (out.isError || out.ui?.kind !== "plan") {
     yield { type: "text", delta: `I couldn't calculate a plan: ${out.content}` };
-    yield { type: "done" };
     return;
   }
   const plan: PlanResult = out.ui.plan;
@@ -112,7 +110,6 @@ export async function* runOfflineAgent(userText: string, profile: Profile): Asyn
     yield { type: "text", delta: chunk };
     await new Promise((r) => setTimeout(r, 8));
   }
-  yield { type: "done" };
 }
 
 function doneWords(m: MeasureId): string {
