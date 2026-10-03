@@ -55,10 +55,12 @@ export async function* runClaudeAgent(history: Msg[], userText: string, profile:
       system,
       tools,
       messages,
-      thinking: { type: "adaptive", display: "summarized" },
+      // Conversations live in the browser and can outlast a deploy that changes the system prompt or tools.
+      // Thinking blocks are bound to that prefix, so drop stale ones instead of failing the whole request.
+      thinking: { type: "adaptive", display: "summarized", block_binding: { prefix_mismatch_behavior: "drop_block" } },
       output_config: { effort: "medium" },
       // Server-side fallback: if the request is declined by a safety classifier, the API re-runs it on a suitable model.
-      betas: ["server-side-fallback-2026-07-01"],
+      betas: ["server-side-fallback-2026-07-01", "thinking-binding-controls-2026-08-01"],
       fallbacks: "default",
     });
 
@@ -72,6 +74,7 @@ export async function* runClaudeAgent(history: Msg[], userText: string, profile:
     }
 
     const message = await stream.finalMessage();
+    if (message.input_transformations?.length) console.info("thinking blocks dropped:", JSON.stringify(message.input_transformations));
     const u = message.usage;
     yield { type: "usage", input: u.input_tokens, output: u.output_tokens, cacheRead: u.cache_read_input_tokens ?? 0, cacheWrite: u.cache_creation_input_tokens ?? 0 };
 
