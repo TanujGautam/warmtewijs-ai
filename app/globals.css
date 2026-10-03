@@ -179,7 +179,88 @@ button, input, textarea { font: inherit; }
   .nav { gap: 14px; }
 }
 
-@media (max-width: 640px) {
-  .nav a:not(.btn) { display: none; }
+/* Header widgets: weather, clock, language */
+.hwidgets { display: flex; gap: 8px; align-items: center; }
+.hchip { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 5px 10px; border: 1px solid var(--line); background: var(--surface); white-space: nowrap; }
+.hchip b { font-weight: 650; }
+.hmuted { color: var(--ink-3); }
+.langSwitch { display: inline-flex; border: 1px solid var(--line); background: var(--surface); }
+.langSwitch button { border: 0; background: transparent; padding: 5px 9px; font-family: var(--font-mono); font-size: 12px; color: var(--ink-3); cursor: pointer; }
+.langSwitch button.on { background: var(--ink); color: #fff; }
+.langSwitch button:not(.on):hover { color: var(--ink); }
+
+@media (max-width: 1100px) {
+  .hchip .hmuted { display: none; }
+}
+@media (max-width: 760px) {
+  .nav a:not(.btn), .hwidgets { display: none; }
   .header { flex-wrap: nowrap; }
 }
+
+/* ---------- Advisor side panel ---------- */
+.traceSec.highlight { background: linear-gradient(180deg, #f3f6ff, var(--surface)); }
+.houseAddr { font-weight: 650; margin-bottom: 8px; line-height: 1.35; }
+.labelBadge { display: inline-block; min-width: 22px; text-align: center; font-weight: 700; color: #fff; padding: 1px 6px; font-size: 12px; }
+.labelBadge.lA { background: #00843d; } .labelBadge.lB { background: #4caf32; } .labelBadge.lC { background: #a8c62a; color: var(--ink); }
+.labelBadge.lD { background: #f2d813; color: var(--ink); } .labelBadge.lE { background: #f4a21d; } .labelBadge.lF { background: #e8641b; } .labelBadge.lG { background: #d7261e; }
+.billValues { margin: 8px 0 0; font-size: 13.5px; }
+.btnSm { padding: 8px 12px; font-size: 13.5px; margin-top: 10px; }
+.proTag { font-family: var(--font-mono); font-size: 10px; background: #fff1db; color: var(--amber); padding: 1px 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+.docList { display: grid; gap: 6px; }
+.docList > button { text-align: left; border: 1px solid var(--line); background: var(--bg); padding: 9px 11px; font-size: 13.5px; cursor: pointer; color: var(--ink); display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.docList > button:hover:not(:disabled) { border-color: var(--blue); color: var(--blue); }
+.docList > button:disabled { opacity: 0.5; cursor: default; }
+.letterForm { display: grid; gap: 6px; padding: 10px; border: 1px dashed var(--line); background: var(--bg); }
+.letterForm input { border: 1px solid var(--line); padding: 7px 9px; font-size: 13.5px; background: var(--surface); }
+.letterForm div { display: flex; gap: 12px; align-items: center; }
+.letterForm .btnSm { margin-top: 0; }
+.infoList { list-style: none; padding: 0; margin: 0; display: grid; gap: 9px; font-size: 13.5px; line-height: 1.45; }
+.adCard { display: grid; gap: 4px; border: 1px solid var(--line); border-left: 4px solid var(--blue); padding: 12px 14px; background: var(--bg); color: var(--ink); font-size: 13.5px; line-height: 1.45; }
+.adCard:hover { color: var(--ink); background: #fff; }
+.adCard strong { font-size: 15px; }
+.adTag { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-3); }
+.adCta { color: var(--blue); font-weight: 600; }
+.adNote { font-size: 11.5px; margin-top: 6px; }
+.detailsSum { cursor: pointer; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--ink-3); }
+details.traceSec > *:not(summary):first-of-type { margin-top: 10px; }
+
+/* ---------- Quote report ---------- */
+.quoteCard { border: 1px solid var(--line); background: var(--surface); margin: 4px 0 6px; }
+.quoteOverall { padding: 12px 16px; font-weight: 600; border-bottom: 1px solid var(--line); }
+.quoteOverall.good { background: #e5f5ec; color: var(--green); }
+.quoteOverall.check { background: #fff4e0; color: var(--amber); }
+.quoteOverall.concerns { background: #fde8e6; color: var(--red); }
+.quoteLine { padding: 12px 16px; border-bottom: 1px solid var(--line-soft); font-size: 14px; line-height: 1.5; }
+.quoteLine p { margin: 4px 0 0; }
+.quoteLineHead { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.qpill { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 7px; text-transform: uppercase; letter-spacing: 0.03em; }
+.qpill.good { background: #e5f5ec; color: var(--green); } .qpill.warn { background: #fff4e0; color: var(--amber); }
+.qpill.bad { background: #fde8e6; color: var(--red); } .qpill.neutral { background: var(--line-soft); color: var(--ink-3); }
+.qmissing, .qquestions { margin: 6px 0 0; padding-left: 20px; }
+.qmissing li { color: var(--amber); }
+.quoteFoot { padding: 12px 16px; }
+
+/* ---------- Composer extras ---------- */
+.attachBtn { border: 1px solid var(--line); background: var(--surface); width: 46px; font-size: 18px; cursor: pointer; }
+.attachBtn:hover:not(:disabled) { border-color: var(--blue); }
+.chipAccent { border-color: var(--blue); color: var(--blue); }
+
+/* ---------- Pricing ---------- */
+.priceGrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 44px; align-items: stretch; }
+.priceCard { position: relative; background: var(--surface); border: 1px solid var(--line); padding: 28px 24px; display: flex; flex-direction: column; gap: 14px; }
+.priceCard.featured { border: 2px solid var(--blue); box-shadow: 0 30px 60px -36px rgba(26, 70, 200, 0.55); }
+.priceCard h2 { font-size: 20px; letter-spacing: -0.02em; }
+.priceAmount { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.priceAmount strong { font-size: 38px; letter-spacing: -0.03em; }
+.priceAmount span { color: var(--ink-3); font-size: 14px; }
+.priceBeta { color: var(--green); font-weight: 600; font-size: 14px; }
+.priceCard ul { list-style: none; padding: 0; margin: 0 0 8px; display: grid; gap: 9px; flex: 1; }
+.priceCard li { padding-left: 24px; position: relative; color: var(--ink-2); font-size: 15px; line-height: 1.45; }
+.priceCard li::before { content: "✓"; position: absolute; left: 0; color: var(--blue); font-weight: 700; }
+.priceRibbon { position: absolute; top: -12px; right: 18px; background: var(--green); color: #fff; font-family: var(--font-mono); font-size: 11px; padding: 3px 9px; text-transform: uppercase; letter-spacing: 0.05em; }
+.priceSoon { cursor: default; opacity: 0.7; }
+.priceFaq { margin-top: 72px; max-width: 760px; }
+.priceFaq details { border-bottom: 1px solid var(--line); padding: 16px 0; }
+.priceFaq summary { cursor: pointer; font-weight: 600; font-size: 17px; }
+.priceFaq p { color: var(--ink-2); line-height: 1.6; margin-top: 8px; }
+@media (max-width: 900px) { .priceGrid { grid-template-columns: 1fr; } }

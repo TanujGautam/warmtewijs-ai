@@ -5,6 +5,8 @@ export type HouseType = "rijtjeshuis" | "hoekwoning" | "twee-onder-een-kap" | "v
 export type Label = "A" | "B" | "C" | "D" | "E" | "F" | "G";
 export type MeasureId = "spouwmuur" | "dak" | "vloer" | "hrglas" | "hybride" | "allelectric" | "zonnepanelen";
 export type Applicant = "owner" | "renter" | "vve";
+export type Lang = "en" | "nl";
+const tr = (lang: Lang, en: string, nl: string) => (lang === "nl" ? nl : en);
 
 export interface House {
   postcode: string;
@@ -64,7 +66,7 @@ export function applyOverrides(house: House, o: HouseOverrides): House {
   return out;
 }
 
-function surfaces(house: House) {
+export function surfaces(house: House) {
   const a = house.floorArea;
   const exposed = { rijtjeshuis: 0.55, hoekwoning: 0.8, "twee-onder-een-kap": 0.9, vrijstaand: 1.15, appartement: 0.45 }[house.type];
   return {
@@ -81,7 +83,7 @@ export function estimateGasUse(house: House): number {
 }
 
 interface MeasureSpec {
-  applicable: (h: House, done: Set<MeasureId>) => string | null; // reason not applicable, or null
+  applicable: (h: House, done: Set<MeasureId>, lang: Lang) => string | null; // reason not applicable, or null
   cost: (h: House) => number;
   gasReduction: number; // fraction of space-heating gas saved
   extraKwh?: (gasSaved: number) => number;
@@ -91,45 +93,60 @@ interface MeasureSpec {
 
 const SPECS: Record<MeasureId, MeasureSpec> = {
   spouwmuur: {
-    applicable: (h) => (h.buildYear < 1925 ? "Pre-1925 walls are usually solid — no cavity to fill." : h.buildYear >= 1975 ? "Built 1975 or later — the cavity is usually already insulated." : null),
+    applicable: (h, _d, l) =>
+      h.buildYear < 1925
+        ? tr(l, "Pre-1925 walls are usually solid — no cavity to fill.", "Muren van vóór 1925 zijn meestal massief — geen spouw om te vullen.")
+        : h.buildYear >= 1975
+          ? tr(l, "Built 1975 or later — the cavity is usually already insulated.", "Gebouwd in 1975 of later — de spouw is meestal al geïsoleerd.")
+          : null,
     cost: (h) => 450 + surfaces(h).wall * 24,
     gasReduction: 0.2,
     labelSteps: 1,
   },
   dak: {
-    applicable: (h) => (h.type === "appartement" ? "Apartment — the roof is a VvE decision." : h.buildYear >= 1992 ? "Built after 1992 — roof was insulated to building code." : null),
+    applicable: (h, _d, l) =>
+      h.type === "appartement"
+        ? tr(l, "Apartment — the roof is a VvE decision.", "Appartement — het dak is een VvE-besluit.")
+        : h.buildYear >= 1992
+          ? tr(l, "Built after 1992 — roof was insulated to building code.", "Gebouwd na 1992 — het dak is volgens het Bouwbesluit geïsoleerd.")
+          : null,
     cost: (h) => 600 + surfaces(h).roof * 60,
     gasReduction: 0.18,
     labelSteps: 1,
   },
   vloer: {
-    applicable: (h) => (h.type === "appartement" ? "Apartment — usually no crawl space." : h.buildYear >= 1992 ? "Built after 1992 — floor was insulated to building code." : null),
+    applicable: (h, _d, l) =>
+      h.type === "appartement"
+        ? tr(l, "Apartment — usually no crawl space.", "Appartement — meestal geen kruipruimte.")
+        : h.buildYear >= 1992
+          ? tr(l, "Built after 1992 — floor was insulated to building code.", "Gebouwd na 1992 — de vloer is volgens het Bouwbesluit geïsoleerd.")
+          : null,
     cost: (h) => 300 + surfaces(h).floor * 35,
     gasReduction: 0.1,
     labelSteps: 0.5,
   },
   hrglas: {
-    applicable: (h) => (h.buildYear >= 2006 ? "Built after 2006 — HR++ is standard." : null),
+    applicable: (h, _d, l) => (h.buildYear >= 2006 ? tr(l, "Built after 2006 — HR++ is standard.", "Gebouwd na 2006 — HR++ is standaard.") : null),
     cost: (h) => surfaces(h).glass * 200,
     gasReduction: 0.12,
     labelSteps: 0.5,
   },
   hybride: {
-    applicable: (h, done) => (done.has("allelectric") ? "Already all-electric." : null),
+    applicable: (h, done, l) => (done.has("allelectric") ? tr(l, "Already all-electric.", "Al volledig elektrisch.") : null),
     cost: () => 5800,
     gasReduction: 0.6,
     extraKwh: (gasSaved) => (gasSaved * 9.77 * 0.95) / 3.6, // heat delivered / SCOP
     labelSteps: 1,
   },
   allelectric: {
-    applicable: (h, done) => (done.has("allelectric") ? "Already all-electric." : null),
+    applicable: (h, done, l) => (done.has("allelectric") ? tr(l, "Already all-electric.", "Al volledig elektrisch.") : null),
     cost: (h) => 11000 + h.floorArea * 25,
     gasReduction: 1,
     extraKwh: (gasSaved) => (gasSaved * 9.77 * 0.95) / 3.2,
     labelSteps: 2,
   },
   zonnepanelen: {
-    applicable: (h) => (h.type === "appartement" ? "Apartment — shared roof, VvE decision." : null),
+    applicable: (h, _d, l) => (h.type === "appartement" ? tr(l, "Apartment — shared roof, VvE decision.", "Appartement — gedeeld dak, VvE-besluit.") : null),
     cost: () => 5200,
     gasReduction: 0,
     solarKwh: 3600,
@@ -157,49 +174,59 @@ export interface PlanResult {
   measures: MeasureResult[];
   totals: { cost: number; subsidy: number; savingPerYear: number; co2TonnesPerYear: number };
   labelFrom: Label;
+  areas: { wall: number; roof: number; floor: number; glass: number }; // estimated m² from floor area and type
   labelTo: Label;
   notes: string[];
 }
 
 const round = (n: number, d = 0) => Math.round(n * 10 ** d) / 10 ** d;
 
+/** ISDE insulation rules (RVO, 2025+): rate per m² (single measure), minimum and maximum subsidised m². */
+export const ISDE_INSULATION = {
+  spouwmuur: { rate: 5.25, min: 10, max: 170, rd: 1.1 },
+  dak: { rate: 16.25, min: 20, max: 200, rd: 3.5 },
+  vloer: { rate: 5.5, min: 20, max: 130, rd: 3.5 },
+  hrglas: { rate: 25, min: 3, max: 45, u: 1.2 },
+} as const;
+type InsulationId = keyof typeof ISDE_INSULATION;
+
 /** Subsidy (indicative ISDE 2026) for a measure, given how many measures are planned together. */
-export function subsidyFor(id: MeasureId, house: House, applicant: Applicant, measureCount: number): { amount: number; conditions: string } {
-  if (applicant === "renter") return { amount: 0, conditions: "Tenants are not eligible for ISDE; the landlord can apply." };
+export function subsidyFor(id: MeasureId, house: House, applicant: Applicant, measureCount: number, lang: Lang = "en"): { amount: number; conditions: string } {
+  if (applicant === "renter") return { amount: 0, conditions: tr(lang, "Tenants are not eligible for ISDE; the landlord can apply.", "Huurders komen niet in aanmerking voor ISDE; de verhuurder kan aanvragen.") };
   const s = surfaces(house);
   const double = measureCount >= 2 ? 2 : 1;
-  const prefix = applicant === "vve" ? "Via SVVE for VvE's. " : "";
-  switch (id) {
-    case "spouwmuur":
-      return { amount: s.wall >= 10 ? s.wall * 5 * double : 0, conditions: `${prefix}≥ 10 m² wall. €${5 * double}/m²${double === 2 ? " (two-measure rate)" : ""}.` };
-    case "dak":
-      return { amount: s.roof >= 10 ? s.roof * 15 * double : 0, conditions: `${prefix}≥ 10 m² roof. €${15 * double}/m²${double === 2 ? " (two-measure rate)" : ""}.` };
-    case "vloer":
-      return { amount: s.floor >= 20 ? round(s.floor * 5.5 * double) : 0, conditions: `${prefix}≥ 20 m² floor. €${round(5.5 * double, 1)}/m²${double === 2 ? " (two-measure rate)" : ""}.` };
-    case "hrglas":
-      return { amount: s.glass >= 3 ? s.glass * 25 * double : 0, conditions: `${prefix}≥ 3 m² glass. €${25 * double}/m²${double === 2 ? " (two-measure rate)" : ""}.` };
-    case "hybride":
-      return { amount: 2100, conditions: `${prefix}Device must be on the RVO apparatus list.` };
-    case "allelectric":
-      return { amount: 3400, conditions: `${prefix}Device must be on the RVO apparatus list.` };
-    case "zonnepanelen":
-      return { amount: 0, conditions: "No ISDE for solar; 0% VAT applies instead." };
+  const prefix = applicant === "vve" ? tr(lang, "Via SVVE for VvE's. ", "Via SVVE voor VvE's. ") : "";
+  const two = double === 2 ? tr(lang, " (two-measure rate)", " (tarief bij twee maatregelen)") : "";
+  if (id in ISDE_INSULATION) {
+    const key = id as InsulationId;
+    const rule = ISDE_INSULATION[key];
+    const area = { spouwmuur: s.wall, dak: s.roof, vloer: s.floor, hrglas: s.glass }[key];
+    const rate = round(rule.rate * double, 2);
+    const amount = area >= rule.min ? Math.round(Math.min(area, rule.max) * rate) : 0;
+    const what = { spouwmuur: tr(lang, "wall", "muur"), dak: tr(lang, "roof", "dak"), vloer: tr(lang, "floor", "vloer"), hrglas: tr(lang, "glass", "glas") }[key];
+    const dec = (n: number) => n.toLocaleString(lang === "nl" ? "nl-NL" : "en-GB");
+    const spec = "rd" in rule ? `Rd ≥ ${dec(rule.rd)}` : `U ≤ ${dec(rule.u)}`;
+    return { amount, conditions: `${prefix}≥ ${rule.min} m² ${what}, ${spec}. €${rate.toLocaleString("nl-NL")}/m²${two}.` };
   }
+  if (id === "hybride") return { amount: 2100, conditions: prefix + tr(lang, "Device must be on the RVO apparatus list (meldcode).", "Het toestel moet op de RVO-apparatenlijst staan (meldcode).") };
+  if (id === "allelectric") return { amount: 3400, conditions: prefix + tr(lang, "Device must be on the RVO apparatus list (meldcode).", "Het toestel moet op de RVO-apparatenlijst staan (meldcode).") };
+  return { amount: 0, conditions: tr(lang, "No ISDE for solar; 0% VAT applies instead.", "Geen ISDE voor zonnepanelen; wel 0% btw.") };
 }
 
 export function calculatePlan(
   house: House,
-  opts: { done?: MeasureId[]; applicant?: Applicant; assumptions?: Partial<Assumptions>; yearsStaying?: number; budget?: number } = {},
+  opts: { done?: MeasureId[]; applicant?: Applicant; assumptions?: Partial<Assumptions>; yearsStaying?: number; budget?: number; lang?: Lang } = {},
 ): PlanResult {
   const done = new Set(opts.done ?? []);
   const applicant = opts.applicant ?? "owner";
+  const l: Lang = opts.lang ?? "en";
   const a = { ...DEFAULT_ASSUMPTIONS, ...opts.assumptions };
   const gasUse = a.gasUseM3 ?? estimateGasUse(house);
   const notes: string[] = [];
 
   // Insulation is evaluated on the remaining gas use after previous insulation (diminishing returns).
   const candidates = MEASURE_IDS.filter((id) => !done.has(id));
-  const applicable = candidates.filter((id) => SPECS[id].applicable(house, done) === null);
+  const applicable = candidates.filter((id) => SPECS[id].applicable(house, done, l) === null);
   const insulationCount = applicable.filter((id) => MEASURES[id].category === "insulation").length;
   const heatingGas = gasUse - 250;
 
@@ -217,13 +244,13 @@ export function calculatePlan(
   for (const id of ordered) {
     const spec = SPECS[id];
     const meta = MEASURES[id];
-    const notApplicable = spec.applicable(house, done);
+    const notApplicable = spec.applicable(house, done, l);
     if (notApplicable) {
       results.push({ id, ...pick(meta), cost: 0, subsidy: 0, netCost: 0, savingPerYear: 0, paybackYears: null, co2TonnesPerYear: 0, status: "not-applicable", reason: notApplicable });
       continue;
     }
     const cost = Math.round(spec.cost(house) / 50) * 50;
-    const sub = subsidyFor(id, house, applicant, insulationCount + (["hybride", "allelectric"].includes(id) ? 1 : 0));
+    const sub = subsidyFor(id, house, applicant, insulationCount + (["hybride", "allelectric"].includes(id) ? 1 : 0), l);
     // All-electric replaces whatever gas is left after the insulation above (heating + tap water).
     const gasSaved = id === "allelectric" ? remainingHeating + 250 : remainingHeating * spec.gasReduction;
     const extraKwh = spec.extraKwh ? spec.extraKwh(gasSaved) : 0;
@@ -238,22 +265,22 @@ export function calculatePlan(
     let reason = "";
     if (id === "allelectric" && (poorLabel || insulationLeft)) {
       status = "later";
-      reason = "Insulate first — an all-electric heat pump needs a well-insulated house (label B or better).";
+      reason = tr(l, "Insulate first — an all-electric heat pump needs a well-insulated house (label B or better).", "Eerst isoleren — een volledige warmtepomp vraagt een goed geïsoleerd huis (label B of beter).");
     } else if (id === "allelectric" && applicable.includes("hybride")) {
       status = "later";
-      reason = "A hybrid heat pump gives most of the saving at half the cost; go all-electric when the boiler is due.";
+      reason = tr(l, "A hybrid heat pump gives most of the saving at half the cost; go all-electric when the boiler is due.", "Een hybride warmtepomp geeft het grootste deel van de besparing voor de helft van de kosten; ga volledig elektrisch als de cv-ketel aan vervanging toe is.");
     } else if (id === "hybride" && poorLabel && insulationLeft) {
       status = "later";
-      reason = "Insulate walls and roof first, then add a hybrid heat pump.";
+      reason = tr(l, "Insulate walls and roof first, then add a hybrid heat pump.", "Isoleer eerst muren en dak, en neem daarna een hybride warmtepomp.");
     } else if (id === "zonnepanelen" && applicable.includes("dak")) {
       status = "later";
-      reason = "Insulate the roof first — moving panels later costs €800–€1.500.";
+      reason = tr(l, "Insulate the roof first — moving panels later costs €800–€1.500.", "Isoleer eerst het dak — panelen later verplaatsen kost €800–€1.500.");
     } else if (payback !== null && opts.yearsStaying && payback > opts.yearsStaying) {
       status = "later";
-      reason = `Payback (${payback} yr) is longer than you plan to stay (${opts.yearsStaying} yr).`;
+      reason = tr(l, `Payback (${payback} yr) is longer than you plan to stay (${opts.yearsStaying} yr).`, `Terugverdientijd (${payback} jr) is langer dan je hier nog woont (${opts.yearsStaying} jr).`);
     } else if (payback === null || payback > 25) {
       status = "later";
-      reason = "Doesn't pay back within 25 years at current prices.";
+      reason = tr(l, "Doesn't pay back within 25 years at current prices.", "Verdient zich bij de huidige prijzen niet binnen 25 jaar terug.");
     } else {
       reason = sub.conditions;
     }
@@ -284,7 +311,7 @@ export function calculatePlan(
       spent += r.netCost;
       if (spent > opts.budget) {
         r.status = "later";
-        r.reason = `Over your budget of €${opts.budget.toLocaleString("nl-NL")} — consider financing (Warmtefonds).`;
+        r.reason = tr(l, `Over your budget of €${opts.budget.toLocaleString("nl-NL")} — consider financing (Warmtefonds).`, `Boven je budget van €${opts.budget.toLocaleString("nl-NL")} — overweeg financiering (Warmtefonds).`);
       }
     }
   }
@@ -292,10 +319,10 @@ export function calculatePlan(
   const final = [...recommended.filter((r) => r.status === "recommended"), ...recommended.filter((r) => r.status !== "recommended"), ...rest];
   const steps = final.filter((r) => r.status === "recommended").reduce((s, r) => s + SPECS[r.id].labelSteps, 0);
   const labelTo = LABELS[Math.min(6, LABELS.indexOf(house.label) + Math.floor(steps))];
-  if (applicant === "renter") notes.push("You rent: structural measures are your landlord's decision. Use this plan to make your request concrete.");
-  if (house.labelSource?.startsWith("estimated")) notes.push(`Energy label ${house.label} is estimated from the build year — tell us your actual label for a sharper plan.`);
-  if (a.gasUseM3 === undefined) notes.push(`Gas use estimated at ${gasUse} m³/yr from label and floor area — enter your actual use for a sharper plan.`);
-  notes.push("Indicative 2026 figures. Get two quotes and check RVO before you sign.");
+  if (applicant === "renter") notes.push(tr(l, "You rent: structural measures are your landlord's decision. Use this plan to make your request concrete.", "Je huurt: bouwkundige maatregelen zijn een besluit van je verhuurder. Gebruik dit plan om je verzoek concreet te maken."));
+  if (house.labelSource?.startsWith("estimated")) notes.push(tr(l, `Energy label ${house.label} is estimated from the build year — tell us your actual label for a sharper plan.`, `Energielabel ${house.label} is geschat op basis van het bouwjaar — noem je echte label voor een scherper plan.`));
+  if (a.gasUseM3 === undefined) notes.push(tr(l, `Gas use estimated at ${gasUse} m³/yr from label and floor area — upload your energy bill for a sharper plan.`, `Gasverbruik geschat op ${gasUse} m³/jr op basis van label en oppervlakte — upload je jaarafrekening voor een scherper plan.`));
+  notes.push(tr(l, "Indicative 2026 figures. Get two quotes and check RVO before you sign.", "Indicatieve bedragen 2026. Vraag twee offertes aan en check RVO voordat je tekent."));
 
   const rec = final.filter((r) => r.status === "recommended");
   return {
@@ -309,6 +336,7 @@ export function calculatePlan(
       co2TonnesPerYear: round(sum(rec.map((r) => r.co2TonnesPerYear)), 1),
     },
     labelFrom: house.label,
+    areas: surfaces(house),
     labelTo,
     notes,
   };

@@ -3,7 +3,8 @@
 //   2. rag     — retrieval: does the right source come back in the top 3? (always run)
 //   3. agent   — end-to-end behaviour of the Claude agent (only with EVAL_LLM=1 and an API key; costs money)
 // Run: npm run evals            (or EVAL_LLM=1 npm run evals)
-import { calculatePlan, type House } from "../lib/engine";
+import { calculatePlan, subsidyFor, type House } from "../lib/engine";
+import { checkQuote, type ExtractedQuote, type QuoteLine } from "../lib/quote-check";
 import { lookupHouse, parseHouseNumber } from "../lib/registers";
 import { search } from "../lib/rag";
 import { runOfflineAgent } from "../lib/offline-agent";
@@ -30,6 +31,27 @@ const engine: Case[] = [
     } },
   { name: "label improves when measures are recommended", run: () => { const p = calculatePlan(house({ label: "E", buildYear: 1955 })); return p.labelTo < p.labelFrom || `${p.labelFrom}→${p.labelTo}`; } },
   { name: "house number parsing (12, 12A, 12-2, 12 h)", run: () => JSON.stringify(["12", "12A", "12-2", "12 h"].map((n) => parseHouseNumber(n))) === JSON.stringify([{ number: 12, suffix: "" }, { number: 12, suffix: "A" }, { number: 12, suffix: "2" }, { number: 12, suffix: "H" }]) },
+];
+
+// Quote checker: deterministic verdicts on extracted quotes.
+const line = (o: Partial<QuoteLine>): QuoteLine => ({ measure: "spouwmuur", description: "", areaM2: null, quantity: null, totalPriceInclVat: null, totalPriceExclVat: null, rdValue: null, uValue: null, material: null, brandModel: null, meldcode: null, capacityKw: null, panelCount: null, ...o });
+const quote = (lines: QuoteLine[], o: Partial<ExtractedQuote> = {}): ExtractedQuote => ({
+  isQuote: true, installerName: "Test BV", installerKvk: "12345678", quoteDate: null, totalInclVat: null, warrantyYears: 10, validityDays: 30, lines,
+  mentions: { cavityInspection: true, ventilationAdvice: true, vapourBarrier: true, crawlspaceVentilation: true, electricalWork: true, vatStated: true },
+  ...o,
+});
+const quotes: Case[] = [
+  { name: "quote: fair cavity wall quote passes", run: () => { const r = checkQuote(quote([line({ areaM2: 80, totalPriceInclVat: 2000, rdValue: 1.3, material: "EPS parels" })]), "en"); return (r.overall === "good" && r.lines[0].verdict === "ok" && r.lines[0].isde === "ok") || JSON.stringify(r.lines[0]); } },
+  { name: "quote: roof under 20 m² fails ISDE", run: () => checkQuote(quote([line({ measure: "dak", areaM2: 15, totalPriceInclVat: 900, rdValue: 4, material: "PIR" })]), "en").lines[0].isde === "fail" },
+  { name: "quote: €150/m² roof is flagged too high", run: () => { const r = checkQuote(quote([line({ measure: "dak", areaM2: 60, totalPriceInclVat: 9000, rdValue: 4, material: "PIR" })]), "en"); return (r.lines[0].verdict === "very-high" && r.overall === "concerns") || r.lines[0].verdict; } },
+  { name: "quote: Rd below 3.5 on a floor fails ISDE", run: () => checkQuote(quote([line({ measure: "vloer", areaM2: 50, totalPriceInclVat: 1800, rdValue: 2.5, material: "PIR" })]), "en").lines[0].isde === "fail" },
+  { name: "quote: missing cavity inspection is flagged", run: () => checkQuote(quote([line({ areaM2: 80, totalPriceInclVat: 2000, rdValue: 1.3, material: "EPS" })], { mentions: { cavityInspection: false, ventilationAdvice: true, vapourBarrier: true, crawlspaceVentilation: true, electricalWork: true, vatStated: true } }), "en").lines[0].missing.some((m) => /inspection/i.test(m)) },
+  { name: "quote: heat pump without meldcode needs an ISDE check", run: () => { const r = checkQuote(quote([line({ measure: "hybride", quantity: 1, totalPriceInclVat: 5500, brandModel: "X", capacityKw: 4 })]), "en"); return (r.lines[0].isde === "check" && r.lines[0].verdict === "ok") || JSON.stringify(r.lines[0]); } },
+  { name: "quote: missing KvK and warranty are general issues", run: () => checkQuote(quote([line({ areaM2: 80, totalPriceInclVat: 2000, rdValue: 1.3, material: "EPS" })], { installerKvk: null, warrantyYears: null }), "en").general.length >= 2 },
+  { name: "quote: Dutch report is in Dutch", run: () => /binnen de gebruikelijke/.test(checkQuote(quote([line({ areaM2: 80, totalPriceInclVat: 2000, rdValue: 1.3, material: "EPS" })]), "nl").lines[0].verdictText) },
+  { name: "ISDE: roof needs 20 m² (RVO 2025+)", run: () => subsidyFor("dak", house({ type: "appartement" }), "owner", 1).amount === 0 && subsidyFor("dak", house({ floorArea: 25 }), "owner", 1).amount === 0 },
+  { name: "ISDE: cavity wall at €5,25/m², doubled with two measures", run: () => { const h = house({}); const one = subsidyFor("spouwmuur", h, "owner", 1).amount; const two = subsidyFor("spouwmuur", h, "owner", 2).amount; return (Math.abs(two - 2 * one) <= 1 && one === Math.round(61 * 5.25)) || `${one} ${two}`; } },
+  { name: "engine: Dutch reasons in Dutch", run: () => /Eerst isoleren|Isoleer eerst/.test(calculatePlan(house({ label: "F", buildYear: 1950 }), { lang: "nl" }).measures.map((m) => m.reason).join(" ")) },
 ];
 
 // Live public registers (PDOK / BAG). Skip with EVAL_OFFLINE=1.
@@ -78,7 +100,7 @@ const agent: Case[] = [
 ];
 
 async function main() {
-  const suites: [string, Case[]][] = [["engine", engine], ["rag", ragCases]];
+  const suites: [string, Case[]][] = [["engine", engine], ["quote checker", quotes], ["rag", ragCases]];
   if (process.env.EVAL_OFFLINE !== "1") suites.push(["registers (live)", registers], ["offline agent", offline]);
   if (process.env.EVAL_LLM === "1") {
     if (hasApiKey()) suites.push(["claude agent", agent]);

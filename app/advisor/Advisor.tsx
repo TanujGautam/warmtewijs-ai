@@ -3,22 +3,20 @@
 import { useEffect, useRef, useState } from "react";
 import type { AgentEvent } from "@/lib/events";
 import type { PlanResult } from "@/lib/engine";
+import type { QuoteReport } from "@/lib/quote-check";
 import type { Profile } from "@/lib/tools";
+import { useLang } from "../components/LangProvider";
+import { PlanCard, QuoteCard } from "./Cards";
+import SidePanel, { type Step } from "./SidePanel";
 import { renderMarkdown } from "./markdown";
 
-type Turn =
-  | { role: "user"; text: string }
-  | { role: "bot"; text: string; thinking: string; plans: PlanResult[]; notices: { kind: "info" | "err"; text: string }[]; live: boolean };
+type Notice = { kind: "info" | "err"; text: string };
+type BotTurn = { role: "bot"; text: string; thinking: string; plans: PlanResult[]; quote?: { report: QuoteReport; summary: string }; notices: Notice[]; live: boolean };
+type Turn = { role: "user"; text: string } | BotTurn;
 
-type Step = { id: string; name: string; input?: unknown; preview?: string; isError?: boolean; kind: "skill" | "tool" | "rag" | "mem" | "web"; pending: boolean };
-
-const STORE = { profile: "ww.profile", history: "ww.history", turns: "ww.turns" };
-const SUGGESTIONS = [
-  "I own a 1970s terraced house at 3511 AB 2. What should I do first?",
-  "Is a hybrid heat pump worth it for me?",
-  "I rent. My landlord won't insulate. What can I do?",
-  "How does the ISDE two-measure rule work?",
-];
+const STORE = { profile: "ww.profile", history: "ww.history", turns: "ww.turns", plan: "ww.plan" };
+const ADDRESS_KEYS = ["postcode", "houseNumber", "houseType", "buildYear", "floorArea", "label", "doneMeasures"] as const;
+const MAX_UPLOAD = 4 * 1024 * 1024;
 
 function load<T>(key: string, fallback: T): T {
   try {
@@ -36,22 +34,45 @@ function save(key: string, value: unknown) {
   }
 }
 
-const eur = (n: number) => `€${Math.round(n).toLocaleString("nl-NL")}`;
 const kindOf = (name: string): Step["kind"] => (name === "load_skill" ? "skill" : name === "search_knowledge" ? "rag" : name === "remember" ? "mem" : name === "web_search" ? "web" : "tool");
 
+/** Photos from phones are large: scale to ≤2000 px JPEG before upload (Claude reads them fine at that size). */
+async function prepareFile(file: File): Promise<File> {
+  if (file.type === "application/pdf" || !file.type.startsWith("image/")) return file;
+  try {
+    const bmp = await createImageBitmap(file);
+    const scale = Math.min(1, 2000 / Math.max(bmp.width, bmp.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(bmp.width * scale);
+    canvas.height = Math.round(bmp.height * scale);
+    canvas.getContext("2d")!.drawImage(bmp, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, "image/jpeg", 0.85));
+    return blob ? new File([blob], file.name.replace(/\.\w+$/, ".jpg"), { type: "image/jpeg" }) : file;
+  } catch {
+    return file; // e.g. HEIC the browser can't decode: send as-is and let the server reject the type
+  }
+}
+
 export default function Advisor() {
+  const { lang, t } = useLang();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [history, setHistory] = useState<unknown[]>([]);
   const [profile, setProfile] = useState<Profile>({});
+  const [plan, setPlan] = useState<PlanResult | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [skillsLoaded, setSkillsLoaded] = useState<string[]>([]);
-  const [mode, setMode] = useState<{ mode: string; model?: string } | null>(null);
-  const [usage, setUsage] = useState({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
-
+  const fileRef = useRef<HTMLInputElement>(null);
+  const uploadKind = useRef<"bill" | "quote">("bill");
   const started = useRef(false);
+
+  function updateProfile(p: Profile) {
+    setProfile(p);
+    save(STORE.profile, p);
+    window.dispatchEvent(new Event("ww:profile")); // header weather follows the house location
+  }
 
   useEffect(() => {
     if (started.current) return; // StrictMode runs effects twice in dev; never double-send
@@ -61,21 +82,22 @@ export default function Advisor() {
     const q = new URLSearchParams(window.location.search).get("q")?.slice(0, 2000);
     if (q) {
       // Arrived from the landing page with an address: start a fresh conversation about that house,
-      // keeping general facts (owner/renter, budget) but not the previous house's details.
+      // keeping general facts (owner/renter, budget, bill) but not the previous house's details.
       const fresh: Profile = { ...savedProfile };
-      for (const k of ["postcode", "houseNumber", "houseType", "buildYear", "floorArea", "label", "doneMeasures"] as const) delete fresh[k];
-      setProfile(fresh);
-      save(STORE.profile, fresh);
+      for (const k of ADDRESS_KEYS) delete fresh[k];
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore from localStorage after mount
+      updateProfile(fresh);
       save(STORE.history, []);
       save(STORE.turns, []);
+      save(STORE.plan, null);
       window.history.replaceState(null, "", "/advisor");
       send(q, { history: [], profile: fresh });
     } else {
       setProfile(savedProfile);
       setHistory(load(STORE.history, []));
-      setTurns(load<Turn[]>(STORE.turns, []).map((t) => (t.role === "bot" ? { ...t, live: false } : t)));
+      setPlan(load<PlanResult | null>(STORE.plan, null));
+      setTurns(load<Turn[]>(STORE.turns, []).map((tt) => (tt.role === "bot" ? { ...tt, live: false } : tt)));
     }
-    fetch("/api/chat").then((r) => r.json()).then((d) => setMode((m) => m ?? d)).catch(() => {});
     // Mount-only by design: restore once, and auto-send the landing-page question at most once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -84,7 +106,7 @@ export default function Advisor() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [turns]);
 
-  function patchBot(fn: (t: Extract<Turn, { role: "bot" }>) => Extract<Turn, { role: "bot" }>) {
+  function patchBot(fn: (b: BotTurn) => BotTurn) {
     setTurns((ts) => {
       const copy = [...ts];
       const last = copy[copy.length - 1];
@@ -92,6 +114,12 @@ export default function Advisor() {
       return copy;
     });
   }
+  const notice = (kind: Notice["kind"], text: string) => patchBot((b) => ({ ...b, notices: [...b.notices, { kind, text }] }));
+  const persistTurns = () =>
+    setTurns((ts) => {
+      save(STORE.turns, ts.slice(-40));
+      return ts;
+    });
 
   async function send(text: string, start?: { history: unknown[]; profile: Profile }) {
     const message = text.trim();
@@ -102,12 +130,15 @@ export default function Advisor() {
     setTurns((ts) => [...ts, { role: "user", text: message }, { role: "bot", text: "", thinking: "", plans: [], notices: [], live: true }]);
 
     let finalHistory: unknown[] | null = null;
-    let latestProfile = start?.profile ?? profile;
     try {
-      const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, history: start?.history ?? history, profile: start?.profile ?? profile }) });
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, history: start?.history ?? history, profile: start?.profile ?? profile, lang }),
+      });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
-        patchBot((t) => ({ ...t, notices: [...t.notices, { kind: "err", text: err.error ?? "Request failed" }] }));
+        notice("err", err.error ?? "Request failed");
         return;
       }
       const reader = res.body.getReader();
@@ -123,14 +154,11 @@ export default function Advisor() {
           if (!part.startsWith("data: ")) continue;
           const ev = JSON.parse(part.slice(6)) as AgentEvent;
           switch (ev.type) {
-            case "status":
-              setMode({ mode: ev.mode, model: ev.model });
-              break;
             case "text":
-              patchBot((t) => ({ ...t, text: t.text + ev.delta }));
+              patchBot((b) => ({ ...b, text: b.text + ev.delta }));
               break;
             case "thinking":
-              patchBot((t) => ({ ...t, thinking: t.thinking + ev.delta }));
+              patchBot((b) => ({ ...b, thinking: b.thinking + ev.delta }));
               break;
             case "tool_call":
               setSteps((s) => [...s, { id: ev.id, name: ev.name, input: ev.input, kind: kindOf(ev.name), pending: true }]);
@@ -138,8 +166,10 @@ export default function Advisor() {
             case "tool_result":
               setSteps((s) => s.map((x) => (x.id === ev.id ? { ...x, preview: ev.preview, isError: ev.isError, pending: false } : x)));
               if (ev.ui?.kind === "plan") {
-                const plan = ev.ui.plan;
-                patchBot((t) => ({ ...t, plans: [plan] }));
+                const p = ev.ui.plan;
+                patchBot((b) => ({ ...b, plans: [p] }));
+                setPlan(p);
+                save(STORE.plan, p);
               }
               if (ev.ui?.kind === "skill") {
                 const name = ev.ui.name;
@@ -150,40 +180,106 @@ export default function Advisor() {
               setSteps((s) => [...s, { id: `${ev.name}-${s.length}`, name: ev.name, preview: ev.detail, kind: "web", pending: false }]);
               break;
             case "memory":
-              latestProfile = ev.profile;
-              setProfile(ev.profile);
-              save(STORE.profile, ev.profile);
+              updateProfile(ev.profile);
               break;
             case "guardrail":
-              patchBot((t) => ({ ...t, notices: [...t.notices, { kind: "info", text: ev.message }] }));
-              break;
-            case "usage":
-              setUsage((u) => ({ input: u.input + ev.input, output: u.output + ev.output, cacheRead: u.cacheRead + ev.cacheRead, cacheWrite: u.cacheWrite + ev.cacheWrite }));
+              notice("info", ev.message);
               break;
             case "history":
               finalHistory = ev.messages;
               break;
             case "error":
-              patchBot((t) => ({ ...t, notices: [...t.notices, { kind: "err", text: ev.message }] }));
+              notice("err", ev.message);
               break;
           }
         }
       }
     } catch (e) {
-      patchBot((t) => ({ ...t, notices: [...t.notices, { kind: "err", text: e instanceof Error ? e.message : "Network error" }] }));
+      notice("err", e instanceof Error ? e.message : "Network error");
     } finally {
-      patchBot((t) => ({ ...t, live: false }));
+      patchBot((b) => ({ ...b, live: false }));
       if (finalHistory) {
         setHistory(finalHistory);
         save(STORE.history, finalHistory);
       }
-      save(STORE.profile, latestProfile);
-      setTurns((ts) => {
-        save(STORE.turns, ts.slice(-40));
-        return ts;
-      });
+      persistTurns();
       setBusy(false);
     }
+  }
+
+  function pickFile(kind: "bill" | "quote") {
+    uploadKind.current = kind;
+    fileRef.current?.click();
+  }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const raw = e.target.files?.[0];
+    e.target.value = "";
+    if (!raw || busy) return;
+    const kind = uploadKind.current;
+    setTurns((ts) => [...ts, { role: "user", text: `📎 ${raw.name}` }, { role: "bot", text: "", thinking: "", plans: [], notices: [{ kind: "info", text: t.upload.privacy }], live: true }]);
+    if (!/^(application\/pdf|image\/(jpeg|png|webp|gif))$/.test(raw.type) && !raw.type.startsWith("image/")) {
+      notice("err", t.upload.badType);
+      patchBot((b) => ({ ...b, live: false }));
+      return;
+    }
+    setBusy(true);
+    let followUp: string | null = null;
+    try {
+      const file = await prepareFile(raw);
+      if (file.size > MAX_UPLOAD) {
+        notice("err", t.upload.tooBig);
+        return;
+      }
+      const form = new FormData();
+      form.append("file", file);
+      form.append("kind", kind);
+      form.append("lang", lang);
+      const res = await fetch("/api/analyze", { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const map: Record<string, string> = { too_big: t.upload.tooBig, bad_type: t.upload.badType, not_a_quote: lang === "nl" ? "Dit lijkt geen offerte voor energiemaatregelen." : "This doesn't look like a quote for energy measures.", unreadable: t.upload.billNothing };
+        notice("err", map[data.error] ?? data.error ?? "Upload failed");
+        return;
+      }
+      if (data.kind === "bill") {
+        const v = data.values as { gasUseM3: number | null; electricityKwh: number | null; gasPrice: number | null; electricityPrice: number | null; label: string | null };
+        const next: Profile = { ...profile };
+        if (v.gasUseM3) next.gasUseM3 = String(v.gasUseM3);
+        if (v.electricityKwh) next.electricityKwh = String(v.electricityKwh);
+        if (v.gasPrice) next.gasPrice = String(v.gasPrice);
+        if (v.electricityPrice) next.electricityPrice = String(v.electricityPrice);
+        if (v.label) next.label = v.label;
+        if (!v.gasUseM3 && !v.electricityKwh && !v.label) {
+          notice("err", t.upload.billNothing);
+          return;
+        }
+        updateProfile(next);
+        const nl = lang === "nl";
+        const parts = [
+          v.gasUseM3 && `${nl ? "Gasverbruik" : "Gas use"}: ${v.gasUseM3.toLocaleString("nl-NL")} m³/${nl ? "jaar" : "year"}.`,
+          v.electricityKwh && `${nl ? "Stroomverbruik" : "Electricity use"}: ${v.electricityKwh.toLocaleString("nl-NL")} kWh/${nl ? "jaar" : "year"}.`,
+          v.gasPrice && `${nl ? "Gasprijs" : "Gas price"}: €${v.gasPrice.toFixed(2)}/m³.`,
+          v.electricityPrice && `${nl ? "Stroomprijs" : "Electricity price"}: €${v.electricityPrice.toFixed(2)}/kWh.`,
+          v.label && `${nl ? "Energielabel" : "Energy label"}: ${v.label}.`,
+        ].filter(Boolean) as string[];
+        patchBot((b) => ({
+          ...b,
+          text: `**${t.upload.billDone}**${data.supplier ? ` (${data.supplier}${data.period ? `, ${data.period}` : ""})` : ""}:\n\n${parts.map((x) => `- ${x}`).join("\n")}${data.scaled ? `\n\n_${nl ? "Omgerekend naar een heel jaar." : "Scaled to a full year."}_` : ""}`,
+        }));
+        followUp = t.upload.billMessage(parts.join(" "));
+      } else if (data.kind === "quote") {
+        patchBot((b) => ({ ...b, quote: { report: data.report, summary: data.summary } }));
+      }
+    } catch (err) {
+      notice("err", err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      patchBot((b) => ({ ...b, live: false }));
+      persistTurns();
+      setBusy(false);
+    }
+    // Let the advisor recalculate with the real figures (after busy is released).
+    if (followUp) setTimeout(() => send(followUp!), 50);
   }
 
   function reset(all: boolean) {
@@ -194,8 +290,9 @@ export default function Advisor() {
     save(STORE.turns, []);
     save(STORE.history, []);
     if (all) {
-      setProfile({});
-      save(STORE.profile, {});
+      setPlan(null);
+      save(STORE.plan, null);
+      updateProfile({});
     }
   }
 
@@ -206,30 +303,32 @@ export default function Advisor() {
           <div className="chatInner">
             {turns.length === 0 && (
               <div className="welcome">
-                <div className="eyebrow">Warmtewijs advisor</div>
-                <h1>What would you like to fix in your house?</h1>
-                <p>Tell me your postcode and house number, and whether you own or rent. Then ask anything about insulation, heat pumps, subsidies, solar or financing. The panel on the right shows each step the agent takes.</p>
+                <div className="eyebrow">{t.advisor.eyebrow}</div>
+                <h1>{t.advisor.welcomeTitle}</h1>
+                <p>{t.advisor.welcomeBody}</p>
               </div>
             )}
-            {turns.map((t, i) =>
-              t.role === "user" ? (
-                <div key={i} className="msgUser">{t.text}</div>
+            {turns.map((tt, i) =>
+              tt.role === "user" ? (
+                <div key={i} className="msgUser">{tt.text}</div>
               ) : (
                 <div key={i} className="msgBot">
                   <div className="who">
-                    <span className={`dot ${t.live ? "live" : ""}`} /> Warmtewijs {t.live && !t.text && "· working…"}
+                    <span className={`dot ${tt.live ? "live" : ""}`} /> Warmtewijs {tt.live && !tt.text && `· ${t.advisor.working}`}
                   </div>
-                  {t.thinking && (
+                  {tt.thinking && (
                     <details className="thinking">
-                      <summary>Reasoning summary</summary>
-                      <div style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{t.thinking}</div>
+                      <summary>{t.advisor.reasoning}</summary>
+                      <div style={{ whiteSpace: "pre-wrap", marginTop: 6 }}>{tt.thinking}</div>
                     </details>
                   )}
-                  {t.plans.map((p, j) => <PlanCard key={j} plan={p} />)}
-                  {t.text && <div className="prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(t.text) }} />}
-                  {t.notices.map((n, j) => (
+                  {tt.plans.map((p, j) => <PlanCard key={j} plan={p} />)}
+                  {tt.quote && <QuoteCard report={tt.quote.report} onAsk={() => send(t.upload.quoteMessage(tt.quote!.summary))} />}
+                  {tt.text && <div className="prose" dangerouslySetInnerHTML={{ __html: renderMarkdown(tt.text) }} />}
+                  {tt.notices.map((n, j) => (
                     <div key={j} className={`notice ${n.kind === "err" ? "err" : ""}`} style={{ marginTop: 8 }}>{n.text}</div>
                   ))}
+                  {tt.live && !tt.text && !tt.plans.length && !tt.quote && tt.notices.length > 0 && <div className="muted" style={{ marginTop: 8 }}>{t.upload.reading}</div>}
                 </div>
               ),
             )}
@@ -239,117 +338,33 @@ export default function Advisor() {
           <div className="composerInner">
             {turns.length === 0 && (
               <div className="chips">
-                {SUGGESTIONS.map((s) => (
+                {t.advisor.suggestions.map((s) => (
                   <button key={s} className="chip" onClick={() => send(s)}>{s}</button>
                 ))}
+                <button className="chip chipAccent" onClick={() => pickFile("bill")}>📎 {t.advisor.attach}</button>
+                <button className="chip chipAccent" onClick={() => pickFile("quote")}>📄 {t.advisor.attachQuote}</button>
               </div>
             )}
             <form className="composerRow" onSubmit={(e) => { e.preventDefault(); send(input); }}>
+              <button type="button" className="attachBtn" title={t.advisor.attach} aria-label={t.advisor.attach} disabled={busy} onClick={() => pickFile("bill")}>📎</button>
               <textarea
                 value={input}
-                placeholder="e.g. 1072 AB 14, we own it. Is cavity wall insulation worth it?"
+                placeholder={t.advisor.placeholder}
                 maxLength={2000}
                 rows={1}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(input); } }}
                 aria-label="Message"
               />
-              <button className="btn" disabled={busy || !input.trim()}>{busy ? "…" : "Send"}</button>
+              <button className="btn" disabled={busy || !input.trim()}>{busy ? "…" : t.advisor.send}</button>
             </form>
-            <div className="hint">Personal numbers (BSN, IBAN, email, phone) are removed before sending. Figures are indicative.</div>
+            <input ref={fileRef} type="file" accept="application/pdf,image/*" hidden onChange={onFile} />
+            <div className="hint">{t.advisor.hint}</div>
           </div>
         </div>
       </section>
 
-      <aside className="trace" aria-label="Agent trace">
-        <div className="traceSec">
-          <h4>
-            <span>Engine</span>
-            {mode && <span className={`pill ${mode.mode === "claude" ? "on" : "off"}`}>{mode.mode === "claude" ? mode.model : "offline · rule-based"}</span>}
-          </h4>
-          {mode?.mode === "offline" && <p className="muted">No ANTHROPIC_API_KEY is set on the server, so a rule-based agent is driving the same tools and skills.</p>}
-          {usage.input + usage.output > 0 && (
-            <dl className="kv" style={{ marginTop: 8 }}>
-              <dt>tokens in</dt><dd>{usage.input.toLocaleString()}</dd>
-              <dt>tokens out</dt><dd>{usage.output.toLocaleString()}</dd>
-              <dt>cache read</dt><dd>{usage.cacheRead.toLocaleString()}</dd>
-              <dt>cache write</dt><dd>{usage.cacheWrite.toLocaleString()}</dd>
-            </dl>
-          )}
-        </div>
-
-        <div className="traceSec">
-          <h4><span>Agent steps (this turn)</span><span>{steps.length || ""}</span></h4>
-          {steps.length === 0 && <p className="muted">Tool calls, skill loads and retrievals appear here as they happen.</p>}
-          {steps.map((s) => (
-            <div className="step" key={s.id}>
-              <span className="name">{s.name}</span>
-              <span className={`tag ${s.isError ? "err" : s.kind}`}>{s.isError ? "error" : s.kind === "mem" ? "memory" : s.kind}</span>
-              {s.pending && <span className="muted"> · running…</span>}
-              {s.input !== undefined && <pre>{JSON.stringify(s.input)}</pre>}
-              {s.preview && <pre>{s.preview}</pre>}
-            </div>
-          ))}
-        </div>
-
-        <div className="traceSec">
-          <h4><span>Skills loaded</span></h4>
-          {skillsLoaded.length ? skillsLoaded.map((s) => <span key={s} className="tag skill" style={{ marginRight: 6 }}>{s}</span>) : <p className="muted">None yet. Skills load on demand.</p>}
-        </div>
-
-        <div className="traceSec">
-          <h4>
-            <span>Memory · your profile</span>
-            <button className="linkBtn" onClick={() => reset(true)}>forget me</button>
-          </h4>
-          {Object.keys(profile).length ? (
-            <dl className="kv">
-              {Object.entries(profile).map(([k, v]) => (
-                <div key={k} style={{ display: "contents" }}>
-                  <dt>{k}</dt>
-                  <dd>{v}</dd>
-                </div>
-              ))}
-            </dl>
-          ) : (
-            <p className="muted">Empty. The agent saves facts you share, and they&apos;re kept in this browser only.</p>
-          )}
-        </div>
-
-        <div className="traceSec">
-          <button className="btn btnGhost" style={{ width: "100%" }} onClick={() => reset(false)}>New conversation</button>
-        </div>
-      </aside>
-    </div>
-  );
-}
-
-function PlanCard({ plan }: { plan: PlanResult }) {
-  const h = plan.house;
-  return (
-    <div className="plan">
-      <div className="planHead">
-        <span>{h.address ?? `${h.postcode} ${h.houseNumber}`} · {h.type} {h.buildYear} · {h.floorArea} m²</span>
-        <span>Label {plan.labelFrom}{h.labelSource?.startsWith("estimated") ? " (est.)" : ""} → {plan.labelTo}</span>
-      </div>
-      <div className="planStats">
-        <div><small>Saving / year</small><strong>{eur(plan.totals.savingPerYear)}</strong></div>
-        <div><small>Subsidy</small><strong>{eur(plan.totals.subsidy)}</strong></div>
-        <div><small>CO₂ / year</small><strong>{plan.totals.co2TonnesPerYear.toLocaleString("nl-NL")} t</strong></div>
-      </div>
-      {plan.measures.filter((m) => m.status !== "not-applicable").map((m, i) => (
-        <div key={m.id} className={`planRow ${m.status === "later" ? "later" : ""}`}>
-          <span className="n">{m.status === "recommended" ? String(i + 1).padStart(2, "0") : "—"}</span>
-          <div>
-            <div>{m.dutch} <span className="muted">· {m.name}</span></div>
-            <div className="sub">{m.status === "recommended" ? `${eur(m.cost)} · subsidy ${eur(m.subsidy)} · saves ${eur(m.savingPerYear)}/yr` : m.reason}</div>
-          </div>
-          <span className="pb">{m.status === "recommended" ? `${m.paybackYears} yr` : "later"}</span>
-        </div>
-      ))}
-      <div className="planRow" style={{ gridTemplateColumns: "1fr" }}>
-        <span className="sub">Assumes gas €{plan.assumptions.gasPrice.toFixed(2)}/m³, electricity €{plan.assumptions.electricityPrice.toFixed(2)}/kWh, {plan.assumptions.gasUseM3} m³/yr. House data: {h.source}. Label: {h.labelSource ?? "register"}. Type: {h.typeSource ?? "register"}. Wrong? Just tell the advisor.</span>
-      </div>
+      <SidePanel plan={plan} profile={profile} steps={steps} skillsLoaded={skillsLoaded} busy={busy} onUpload={pickFile} onReset={reset} />
     </div>
   );
 }

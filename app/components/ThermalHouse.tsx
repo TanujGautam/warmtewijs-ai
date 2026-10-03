@@ -2,10 +2,11 @@
 // Pure SVG, no images; the hot spots pulse gently (disabled under reduced motion).
 import s from "../landing.module.css";
 
-export default function ThermalHouse() {
+export default function ThermalHouse({ lang = "en" }: { lang?: "en" | "nl" }) {
+  const nl = lang === "nl";
   return (
     <svg className={s.thermal} viewBox="0 0 520 440" role="img" aria-labelledby="thermal-title thermal-desc">
-      <title id="thermal-title">Thermal image of a house</title>
+      <title id="thermal-title">{nl ? "Warmtebeeld van een huis" : "Thermal image of a house"}</title>
       <desc id="thermal-desc">Infrared view showing heat escaping through the roof, the uninsulated cavity wall and single glazing.</desc>
       <defs>
         <radialGradient id="th-bg" cx="50%" cy="55%" r="75%">
@@ -82,7 +83,7 @@ export default function ThermalHouse() {
         <path d="M260 196 v16 M252 204 h16" />
       </g>
       <text x="40" y="66" fill="#fff" fillOpacity=".7" fontFamily="var(--font-mono)" fontSize="11" letterSpacing="1">IR · 21:04 · 3511 AB</text>
-      <text x="40" y="82" fill="#fff" fillOpacity=".45" fontFamily="var(--font-mono)" fontSize="10">outside 2.4 °C</text>
+      <text x="40" y="82" fill="#fff" fillOpacity=".45" fontFamily="var(--font-mono)" fontSize="10">{nl ? "buiten 2,4 °C" : "outside 2.4 °C"}</text>
 
       {/* temperature scale */}
       <rect x="474" y="96" width="10" height="200" rx="5" fill="url(#th-scale)" />
@@ -93,13 +94,13 @@ export default function ThermalHouse() {
       <g fontFamily="var(--font-mono)" fontSize="11" fill="#fff">
         <path d="M236 150 L176 128 H40" stroke="#fff" strokeOpacity=".6" fill="none" />
         <circle cx="236" cy="150" r="3" />
-        <text x="40" y="122">ROOF · 25% LOSS</text>
+        <text x="40" y="122">{nl ? "DAK · 25% VERLIES" : "ROOF · 25% LOSS"}</text>
         <path d="M160 290 L120 252 H40" stroke="#fff" strokeOpacity=".6" fill="none" />
         <circle cx="160" cy="290" r="3" />
-        <text x="40" y="246">EMPTY CAVITY WALL</text>
+        <text x="40" y="246">{nl ? "LEGE SPOUWMUUR" : "EMPTY CAVITY WALL"}</text>
         <path d="M348 270 L420 330 H486" stroke="#fff" strokeOpacity=".6" fill="none" />
         <circle cx="348" cy="270" r="3" />
-        <text x="404" y="324">SINGLE GLASS</text>
+        <text x="404" y="324">{nl ? "ENKEL GLAS" : "SINGLE GLASS"}</text>
       </g>
     </svg>
   );

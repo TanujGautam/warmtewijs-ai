@@ -6,6 +6,7 @@ import type { AgentEvent } from "./events";
 import { LIMITS } from "./guardrails";
 import { buildSystemPrompt } from "./skills";
 import { executeTool, TOOL_DEFS, type Profile } from "./tools";
+import type { Lang } from "./i18n";
 
 export const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5-5";
 
@@ -29,7 +30,7 @@ function preview(s: string, n = 400) {
   return s.length > n ? `${s.slice(0, n)}…` : s;
 }
 
-export async function* runClaudeAgent(history: Msg[], userText: string, profile: Profile): AsyncGenerator<AgentEvent> {
+export async function* runClaudeAgent(history: Msg[], userText: string, profile: Profile, lang: Lang = "en"): AsyncGenerator<AgentEvent> {
   const client = new Anthropic();
   const tools = buildTools();
   const system: Anthropic.Beta.BetaTextBlockParam[] = [{ type: "text", text: buildSystemPrompt(), cache_control: { type: "ephemeral" } }];
@@ -40,7 +41,7 @@ export async function* runClaudeAgent(history: Msg[], userText: string, profile:
     {
       role: "user",
       content: [
-        { type: "text", text: `<user_profile>\n${JSON.stringify(profile)}\n</user_profile>` },
+        { type: "text", text: `<user_profile>\n${JSON.stringify(profile)}\n</user_profile>\n<preferences>\n${JSON.stringify({ language: lang === "nl" ? "Dutch (nl)" : "English (en)" })}\n</preferences>` },
         { type: "text", text: userText },
       ],
     },
@@ -98,7 +99,7 @@ export async function* runClaudeAgent(history: Msg[], userText: string, profile:
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
     for (const tu of toolUses) {
       yield { type: "tool_call", id: tu.id, name: tu.name, input: tu.input };
-      const out = await executeTool(tu.name, tu.input, profile);
+      const out = await executeTool(tu.name, tu.input, profile, lang);
       yield { type: "tool_result", id: tu.id, name: tu.name, isError: !!out.isError, preview: preview(out.content), ui: out.ui };
       if (out.ui?.kind === "memory") yield { type: "memory", profile: { ...profile } };
       results.push({ type: "tool_result", tool_use_id: tu.id, content: out.content, ...(out.isError && { is_error: true }) });

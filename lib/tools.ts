@@ -2,12 +2,12 @@
 // the Claude agent loop, the offline fallback agent, and the MCP endpoint.
 import type Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
-import { applyOverrides, calculatePlan, HOUSE_TYPES, LABEL_VALUES, MEASURE_IDS, MEASURES, subsidyFor, monthlyPayment, type House, type HouseType, type Label, type MeasureId } from "./engine";
+import { applyOverrides, calculatePlan, type Lang, HOUSE_TYPES, LABEL_VALUES, MEASURE_IDS, MEASURES, subsidyFor, monthlyPayment, type House, type HouseType, type Label, type MeasureId } from "./engine";
 import { lookupHouse } from "./registers";
 import { search } from "./rag";
 import { getSkill, SKILL_NAMES } from "./skills";
 
-export const PROFILE_KEYS = ["postcode", "houseNumber", "applicant", "doneMeasures", "budget", "yearsStaying", "gasUseM3", "houseType", "buildYear", "floorArea", "label", "name", "notes"] as const;
+export const PROFILE_KEYS = ["postcode", "houseNumber", "applicant", "doneMeasures", "budget", "yearsStaying", "gasUseM3", "electricityKwh", "gasPrice", "electricityPrice", "houseType", "buildYear", "floorArea", "label", "name", "notes"] as const;
 export type ProfileKey = (typeof PROFILE_KEYS)[number];
 export type Profile = Partial<Record<ProfileKey, string>>;
 
@@ -162,7 +162,7 @@ async function resolveHouse(i: OverrideInput): Promise<House | { error: string }
   return applyOverrides(r, o);
 }
 
-export async function executeTool(name: string, rawInput: unknown, profile: Profile): Promise<ToolOutcome> {
+export async function executeTool(name: string, rawInput: unknown, profile: Profile, lang: Lang = "en"): Promise<ToolOutcome> {
   if (!(name in schemas)) return { content: `Unknown tool: ${name}`, isError: true };
   const parsed = schemas[name as ToolName].safeParse(rawInput);
   if (!parsed.success) return { content: `Invalid input: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`, isError: true };
@@ -183,6 +183,7 @@ export async function executeTool(name: string, rawInput: unknown, profile: Prof
         applicant: i.applicant,
         budget: i.budget,
         yearsStaying: i.years_staying,
+        lang,
         assumptions: { gasUseM3: i.gas_use_m3, ...(i.gas_price && { gasPrice: i.gas_price }), ...(i.electricity_price && { electricityPrice: i.electricity_price }) },
       });
       return { content: JSON.stringify(plan), ui: { kind: "plan", plan } };
@@ -193,7 +194,7 @@ export async function executeTool(name: string, rawInput: unknown, profile: Prof
       if ("error" in house) return { content: house.error, isError: true };
       const insulation = i.measures.filter((m) => MEASURES[m].category === "insulation").length;
       const heat = i.measures.some((m) => MEASURES[m].category === "heat") ? 1 : 0;
-      const rows = i.measures.map((m) => ({ measure: m, ...subsidyFor(m, house, i.applicant, insulation + heat) }));
+      const rows = i.measures.map((m) => ({ measure: m, ...subsidyFor(m, house, i.applicant, insulation + heat, lang) }));
       return { content: JSON.stringify({ applicant: i.applicant, twoMeasureRate: insulation + heat >= 2, subsidies: rows, applyWithin: "24 months after installation", source: "isde-2026" }) };
     }
     case "search_knowledge": {
