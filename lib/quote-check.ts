@@ -57,6 +57,7 @@ export interface LineReport {
   isde: IsdeStatus;
   isdeNotes: string[];
   missing: string[];
+  asks: string[]; // questions for the installer that go with the missing items
 }
 
 export interface QuoteReport {
@@ -71,6 +72,7 @@ export interface QuoteReport {
 
 const tr = (l: Lang, en: string, nl: string) => (l === "nl" ? nl : en);
 const eur = (n: number) => `€${Math.round(n).toLocaleString("nl-NL")}`;
+const dec = (n: number, l: Lang) => n.toLocaleString(l === "nl" ? "nl-NL" : "en-GB", { maximumFractionDigits: 2 });
 
 const NAMES: Record<QuoteMeasure, [string, string]> = {
   spouwmuur: ["Cavity wall insulation", "Spouwmuurisolatie"],
@@ -168,20 +170,20 @@ function checkLine(line: QuoteLine, q: ExtractedQuote, l: Lang): LineReport {
     if (rule.rd !== undefined) {
       if (line.rdValue === null) {
         if (isde === "ok") isde = "check";
-        isdeNotes.push(tr(l, `Rd-value not stated; ISDE requires Rd ≥ ${rule.rd}.`, `Rd-waarde niet vermeld; ISDE vraagt Rd ≥ ${rule.rd}.`));
+        isdeNotes.push(tr(l, `Rd-value not stated; ISDE requires Rd ≥ ${dec(rule.rd, l)}.`, `Rd-waarde niet vermeld; ISDE vraagt Rd ≥ ${dec(rule.rd, l)}.`));
       } else if (line.rdValue < rule.rd) {
         isde = "fail";
-        isdeNotes.push(tr(l, `Rd ${line.rdValue} is below the ISDE requirement of ${rule.rd}.`, `Rd ${line.rdValue} is lager dan de ISDE-eis van ${rule.rd}.`));
-      } else isdeNotes.push(tr(l, `Rd ${line.rdValue} meets the ISDE requirement (≥ ${rule.rd}).`, `Rd ${line.rdValue} voldoet aan de ISDE-eis (≥ ${rule.rd}).`));
+        isdeNotes.push(tr(l, `Rd ${dec(line.rdValue, l)} is below the ISDE requirement of ${dec(rule.rd, l)}.`, `Rd ${dec(line.rdValue, l)} is lager dan de ISDE-eis van ${dec(rule.rd, l)}.`));
+      } else isdeNotes.push(tr(l, `Rd ${dec(line.rdValue, l)} meets the ISDE requirement (≥ ${dec(rule.rd, l)}).`, `Rd ${dec(line.rdValue, l)} voldoet aan de ISDE-eis (≥ ${dec(rule.rd, l)}).`));
     }
     if (rule.u !== undefined) {
       if (line.uValue === null) {
         if (isde === "ok") isde = "check";
-        isdeNotes.push(tr(l, `U-value not stated; ISDE requires U ≤ ${rule.u}.`, `U-waarde niet vermeld; ISDE vraagt U ≤ ${rule.u}.`));
+        isdeNotes.push(tr(l, `U-value not stated; ISDE requires U ≤ ${dec(rule.u, l)}.`, `U-waarde niet vermeld; ISDE vraagt U ≤ ${dec(rule.u, l)}.`));
       } else if (line.uValue > rule.u) {
         isde = "fail";
-        isdeNotes.push(tr(l, `U ${line.uValue} is above the ISDE maximum of ${rule.u}.`, `U ${line.uValue} is hoger dan het ISDE-maximum van ${rule.u}.`));
-      } else isdeNotes.push(tr(l, `U ${line.uValue} meets the ISDE requirement (≤ ${rule.u}).`, `U ${line.uValue} voldoet aan de ISDE-eis (≤ ${rule.u}).`));
+        isdeNotes.push(tr(l, `U ${dec(line.uValue, l)} is above the ISDE maximum of ${dec(rule.u, l)}.`, `U ${dec(line.uValue, l)} is hoger dan het ISDE-maximum van ${dec(rule.u, l)}.`));
+      } else isdeNotes.push(tr(l, `U ${dec(line.uValue, l)} meets the ISDE requirement (≤ ${dec(rule.u, l)}).`, `U ${dec(line.uValue, l)} voldoet aan de ISDE-eis (≤ ${dec(rule.u, l)}).`));
     }
   } else if (line.measure === "hybride" || line.measure === "allelectric") {
     isde = line.meldcode ? "ok" : "check";
@@ -196,15 +198,20 @@ function checkLine(line: QuoteLine, q: ExtractedQuote, l: Lang): LineReport {
 
   // Missing items
   const missing: string[] = [];
+  const asks: string[] = [];
+  const miss = (en: string, nl: string, askEn: string, askNl: string) => {
+    missing.push(tr(l, en, nl));
+    asks.push(tr(l, askEn, askNl));
+  };
   const m = q.mentions;
-  if (line.measure === "spouwmuur" && !m.cavityInspection) missing.push(tr(l, "No cavity inspection (boroscope check of cavity width and wall condition).", "Geen spouwonderzoek (boroscoopcontrole van spouwbreedte en muur)."));
-  if (INSULATION.includes(line.measure) && !line.material && line.measure !== "hrglas" && line.measure !== "triple") missing.push(tr(l, "Insulation material not specified.", "Isolatiemateriaal niet vermeld."));
-  if (line.measure === "dak" && !m.vapourBarrier) missing.push(tr(l, "No vapour barrier (dampremmende folie) mentioned.", "Geen dampremmende folie vermeld."));
-  if ((line.measure === "vloer" || line.measure === "bodem") && !m.crawlspaceVentilation) missing.push(tr(l, "No crawl space ventilation check mentioned.", "Geen controle van de kruipruimteventilatie vermeld."));
-  if ((line.measure === "hybride" || line.measure === "allelectric") && !line.capacityKw) missing.push(tr(l, "Heat pump capacity (kW) not stated.", "Vermogen van de warmtepomp (kW) niet vermeld."));
-  if ((line.measure === "hybride" || line.measure === "allelectric") && !line.brandModel) missing.push(tr(l, "Brand and model not stated.", "Merk en type niet vermeld."));
-  if ((line.measure === "hybride" || line.measure === "allelectric") && !m.electricalWork) missing.push(tr(l, "Electrical work (extra group in the meter box) not mentioned.", "Elektrawerk (extra groep in de meterkast) niet vermeld."));
-  if (line.measure === "zonnepanelen" && !line.panelCount && !line.quantity) missing.push(tr(l, "Number of panels not stated.", "Aantal panelen niet vermeld."));
+  if (line.measure === "spouwmuur" && !m.cavityInspection) miss("No cavity inspection (boroscope check of cavity width and wall condition).", "Geen spouwonderzoek (boroscoopcontrole van spouwbreedte en muur).", "Is a cavity inspection with a boroscope included before the work starts?", "Zit er vooraf een spouwonderzoek met boroscoop bij?");
+  if (INSULATION.includes(line.measure) && !line.material && line.measure !== "hrglas" && line.measure !== "triple") miss("Insulation material not specified.", "Isolatiemateriaal niet vermeld.", "Which insulation material do you use?", "Welk isolatiemateriaal gebruikt u?");
+  if (line.measure === "dak" && !m.vapourBarrier) miss("No vapour barrier (dampremmende folie) mentioned.", "Geen dampremmende folie vermeld.", "Is a vapour barrier (dampremmende folie) included?", "Is dampremmende folie inbegrepen?");
+  if ((line.measure === "vloer" || line.measure === "bodem") && !m.crawlspaceVentilation) miss("No crawl space ventilation check mentioned.", "Geen controle van de kruipruimteventilatie vermeld.", "Do you check the crawl space ventilation and moisture?", "Controleert u de ventilatie en het vocht in de kruipruimte?");
+  if ((line.measure === "hybride" || line.measure === "allelectric") && !line.capacityKw) miss("Heat pump capacity (kW) not stated.", "Vermogen van de warmtepomp (kW) niet vermeld.", "What capacity (kW) is the heat pump, and is it based on a heat loss calculation?", "Welk vermogen (kW) heeft de warmtepomp, en is dat gebaseerd op een warmteverliesberekening?");
+  if ((line.measure === "hybride" || line.measure === "allelectric") && !line.brandModel) miss("Brand and model not stated.", "Merk en type niet vermeld.", "Which brand and model do you install?", "Welk merk en type installeert u?");
+  if ((line.measure === "hybride" || line.measure === "allelectric") && !m.electricalWork) miss("Electrical work (extra group in the meter box) not mentioned.", "Elektrawerk (extra groep in de meterkast) niet vermeld.", "Is the electrical work (extra group in the meter box) included?", "Is het elektrawerk (extra groep in de meterkast) inbegrepen?");
+  if (line.measure === "zonnepanelen" && !line.panelCount && !line.quantity) miss("Number of panels not stated.", "Aantal panelen niet vermeld.", "How many panels, and how many Wp each?", "Hoeveel panelen, en hoeveel Wp per paneel?");
 
   return {
     measure: line.measure,
@@ -220,11 +227,12 @@ function checkLine(line: QuoteLine, q: ExtractedQuote, l: Lang): LineReport {
     isde,
     isdeNotes,
     missing,
+    asks,
   };
 }
 
 export function checkQuote(q: ExtractedQuote, l: Lang): QuoteReport {
-  const lines = q.lines.filter((x) => x.measure !== "other" || (price(x) ?? 0) > 0).map((x) => checkLine(x, q, l));
+  const lines = q.lines.filter((x) => x.measure !== "other").map((x) => checkLine(x, q, l));
   const general: string[] = [];
   if (!q.installerKvk) general.push(tr(l, "No KvK number on the quote. ISDE requires the work to be done by a registered company.", "Geen KvK-nummer op de offerte. ISDE vereist dat een geregistreerd bedrijf het werk uitvoert."));
   if (!q.warrantyYears) general.push(tr(l, "No warranty period stated.", "Geen garantietermijn vermeld."));
@@ -237,7 +245,7 @@ export function checkQuote(q: ExtractedQuote, l: Lang): QuoteReport {
   for (const x of lines) {
     if (x.verdict === "high" || x.verdict === "very-high") questions.push(tr(l, `Why is the ${x.name.toLowerCase()} priced at ${eur(x.unitPrice!)} per ${x.unit}?`, `Waarom kost de ${x.name.toLowerCase()} ${eur(x.unitPrice!)} per ${x.unit}?`));
     if (x.isde === "check" || x.isde === "fail") questions.push(tr(l, `Can you confirm the ${x.name.toLowerCase()} meets the ISDE requirements (${x.isdeNotes[0] ?? "Rd/U-value, m²"})?`, `Kunt u bevestigen dat de ${x.name.toLowerCase()} voldoet aan de ISDE-eisen (${x.isdeNotes[0] ?? "Rd/U-waarde, m²"})?`));
-    for (const miss of x.missing.slice(0, 2)) questions.push(tr(l, `Please add: ${miss}`, `Graag toevoegen: ${miss}`));
+    questions.push(...x.asks.slice(0, 2));
   }
 
   const bad = lines.filter((x) => x.verdict === "very-high" || x.isde === "fail").length;
