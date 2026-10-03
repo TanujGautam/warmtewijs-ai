@@ -154,16 +154,38 @@ function typeFromEp(gebouwtype: string): HouseType | null {
   return null;
 }
 
-async function fetchLabel(vboId: string): Promise<EpLabel | null> {
-  const key = process.env.EP_ONLINE_API_KEY;
-  if (!key) return null;
+type LabelLookup =
+  | { status: "found"; label: EpLabel }
+  | { status: "none" } // EP-Online answered: no label registered for this address
+  | { status: "not-configured" }
+  | { status: "failed"; detail: string }; // auth problem, outage, timeout — don't cache
+
+async function fetchLabel(vboId: string): Promise<LabelLookup> {
+  const key = process.env.EP_ONLINE_API_KEY?.trim(); // pasted keys often carry a trailing newline
+  if (!key) return { status: "not-configured" };
   try {
-    const labels = await getJson<EpLabel[]>(`${EP_ONLINE}/${vboId}`, { Authorization: key });
-    return labels.sort((a, b) => String(b.Registratiedatum).localeCompare(String(a.Registratiedatum)))[0] ?? null;
-  } catch {
-    return null; // label is a nice-to-have; fall back to an estimate
+    const res = await fetch(`${EP_ONLINE}/${vboId}`, { headers: { Accept: "application/json", Authorization: key }, signal: AbortSignal.timeout(TIMEOUT_MS) });
+    if (res.status === 404 || res.status === 204) return { status: "none" };
+    if (!res.ok) {
+      const detail = `EP-Online returned ${res.status}${res.status === 401 || res.status === 403 ? " (check EP_ONLINE_API_KEY; new keys work ~5 minutes after activation)" : ""}`;
+      console.warn(detail);
+      return { status: "failed", detail };
+    }
+    const labels = (await res.json()) as EpLabel[];
+    const latest = labels.sort((a, b) => String(b.Registratiedatum).localeCompare(String(a.Registratiedatum)))[0];
+    return latest ? { status: "found", label: latest } : { status: "none" };
+  } catch (err) {
+    const detail = `EP-Online unreachable: ${err instanceof Error ? err.message : String(err)}`;
+    console.warn(detail);
+    return { status: "failed", detail };
   }
 }
+
+const LABEL_SOURCE: Record<Exclude<LabelLookup["status"], "found">, string> = {
+  none: "estimated from build year — no label registered in EP-Online",
+  "not-configured": "estimated from build year — EP-Online not configured",
+  failed: "estimated from build year — EP-Online lookup failed",
+};
 
 /** Rough label estimate by construction period, used only when no registered label is available. */
 export function estimateLabel(buildYear: number): Label {
@@ -190,7 +212,8 @@ async function lookupUncached(postcode: string, houseNumber: string): Promise<Lo
     const pandHref = vbo.properties["pand.href"]?.[0];
     if (!pandHref) return { error: `The BAG has no building linked to ${addr.weergavenaam}.` };
 
-    const [pand, ep] = await Promise.all([getJson<Pand>(`${pandHref}${pandHref.includes("?") ? "&" : "?"}f=json`), fetchLabel(addr.adresseerbaarobject_id)]);
+    const [pand, labelLookup] = await Promise.all([getJson<Pand>(`${pandHref}${pandHref.includes("?") ? "&" : "?"}f=json`), fetchLabel(addr.adresseerbaarobject_id)]);
+    const ep = labelLookup.status === "found" ? labelLookup.label : null;
     const use = uses.join(", ");
 
     const epType = ep?.Gebouwtype ? typeFromEp(ep.Gebouwtype) : null;
@@ -206,10 +229,11 @@ async function lookupUncached(postcode: string, houseNumber: string): Promise<Lo
       type: type ?? "rijtjeshuis",
       floorArea: vbo.properties.oppervlakte,
       label: epLabel ?? estimateLabel(buildYear),
-      labelSource: epLabel ? `EP-Online (registered${ep?.Registratiedatum ? ` ${ep.Registratiedatum.slice(0, 10)}` : ""})` : "estimated from build year — no registered label retrieved",
+      labelSource: epLabel ? `EP-Online (registered${ep?.Registratiedatum ? ` ${ep.Registratiedatum.slice(0, 10)}` : ""})` : LABEL_SOURCE[labelLookup.status === "found" ? "none" : labelLookup.status],
       typeSource: epType ? "EP-Online" : type ? "derived from BAG building footprints" : "unknown — assumed terraced",
       use,
       source: `BAG (Kadaster) via PDOK${epLabel ? " + EP-Online" : ""}`,
+      ...(labelLookup.status === "failed" && { transient: true }),
     };
   } catch (err) {
     const reason = err instanceof Error ? err.message : String(err);
@@ -223,8 +247,8 @@ export function lookupHouse(postcode: string, houseNumber: string): Promise<Look
   if (!hit) {
     hit = lookupUncached(postcode, houseNumber);
     cache.set(key, hit);
-    // Don't keep failures around: a transient register outage shouldn't stick.
-    hit.then((r) => "error" in r && cache.delete(key));
+    // Don't keep failures around: a register outage or a not-yet-active key shouldn't stick.
+    hit.then((r) => ("error" in r || ("transient" in r && r.transient)) && cache.delete(key));
     if (cache.size > 2000) cache.delete(cache.keys().next().value!);
   }
   return hit;

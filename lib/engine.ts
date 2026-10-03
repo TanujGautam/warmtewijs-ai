@@ -18,6 +18,7 @@ export interface House {
   labelSource?: string;
   typeSource?: string;
   use?: string;
+  transient?: boolean; // part of the data came from a failed lookup; don't cache
 }
 
 export interface Assumptions {
