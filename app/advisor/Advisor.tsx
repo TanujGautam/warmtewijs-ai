@@ -8,6 +8,7 @@ import type { Profile } from "@/lib/tools";
 import { useLang } from "../components/LangProvider";
 import { PlanCard, QuoteCard } from "./Cards";
 import SidePanel, { type Step } from "./SidePanel";
+import { startCheckout, usePlus } from "../components/usePlus";
 import { renderMarkdown } from "./markdown";
 
 type Notice = { kind: "info" | "err"; text: string };
@@ -67,6 +68,14 @@ export default function Advisor() {
   const fileRef = useRef<HTMLInputElement>(null);
   const uploadKind = useRef<"bill" | "quote">("bill");
   const started = useRef(false);
+  const plus = usePlus();
+  const [banner, setBanner] = useState<Notice | null>(null);
+
+  async function buyPlus() {
+    setBanner({ kind: "info", text: t.plus.buying });
+    const house = plan?.house.address ?? (profile.postcode ? `${profile.postcode} ${profile.houseNumber ?? ""}`.trim() : undefined);
+    if (!(await startCheckout(lang, house))) setBanner({ kind: "err", text: t.plus.checkoutError });
+  }
 
   function updateProfile(p: Profile) {
     setProfile(p);
@@ -79,13 +88,19 @@ export default function Advisor() {
     started.current = true;
     // Restore persisted state after mount (localStorage is unavailable during SSR).
     const savedProfile = load<Profile>(STORE.profile, {});
-    const q = new URLSearchParams(window.location.search).get("q")?.slice(0, 2000);
+    const params = new URLSearchParams(window.location.search);
+    const plusResult = params.get("plus");
+    if (plusResult) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time message after returning from Stripe
+      setBanner(plusResult === "active" ? { kind: "info", text: t.plus.activated } : { kind: "err", text: t.plus.failed });
+      window.history.replaceState(null, "", "/advisor");
+    }
+    const q = params.get("q")?.slice(0, 2000);
     if (q) {
       // Arrived from the landing page with an address: start a fresh conversation about that house,
       // keeping general facts (owner/renter, budget, bill) but not the previous house's details.
       const fresh: Profile = { ...savedProfile };
       for (const k of ADDRESS_KEYS) delete fresh[k];
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- one-time restore from localStorage after mount
       updateProfile(fresh);
       save(STORE.history, []);
       save(STORE.turns, []);
@@ -208,6 +223,10 @@ export default function Advisor() {
   }
 
   function pickFile(kind: "bill" | "quote") {
+    if (kind === "quote" && !plus.unlocked) {
+      buyPlus();
+      return;
+    }
     uploadKind.current = kind;
     fileRef.current?.click();
   }
@@ -238,6 +257,11 @@ export default function Advisor() {
       const res = await fetch("/api/analyze", { method: "POST", body: form });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (data.error === "plus_required" || data.error === "plus_quota") {
+          notice("err", data.error === "plus_quota" ? t.plus.quota : t.plus.required);
+          plus.refresh();
+          return;
+        }
         const map: Record<string, string> = { too_big: t.upload.tooBig, bad_type: t.upload.badType, not_a_quote: lang === "nl" ? "Dit lijkt geen offerte voor energiemaatregelen." : "This doesn't look like a quote for energy measures.", unreadable: t.upload.billNothing };
         notice("err", map[data.error] ?? data.error ?? "Upload failed");
         return;
@@ -270,6 +294,7 @@ export default function Advisor() {
         followUp = t.upload.billMessage(parts.join(" "));
       } else if (data.kind === "quote") {
         patchBot((b) => ({ ...b, quote: { report: data.report, summary: data.summary } }));
+        plus.refresh();
       }
     } catch (err) {
       notice("err", err instanceof Error ? err.message : "Upload failed");
@@ -301,6 +326,12 @@ export default function Advisor() {
       <section className="chatCol">
         <div className="chatScroll" ref={scrollRef}>
           <div className="chatInner">
+            {banner && (
+              <div className={`notice banner ${banner.kind === "err" ? "err" : "ok"}`} role="status">
+                {banner.text}
+                <button className="linkBtn" onClick={() => setBanner(null)} aria-label="Close">✕</button>
+              </div>
+            )}
             {turns.length === 0 && (
               <div className="welcome">
                 <div className="eyebrow">{t.advisor.eyebrow}</div>
@@ -364,7 +395,7 @@ export default function Advisor() {
         </div>
       </section>
 
-      <SidePanel plan={plan} profile={profile} steps={steps} skillsLoaded={skillsLoaded} busy={busy} onUpload={pickFile} onReset={reset} />
+      <SidePanel plan={plan} profile={profile} steps={steps} skillsLoaded={skillsLoaded} busy={busy} plus={plus} onBuy={buyPlus} onUpload={pickFile} onReset={reset} />
     </div>
   );
 }

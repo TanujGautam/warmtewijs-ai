@@ -148,6 +148,21 @@ const en = {
     quoteMessage: (summary: string) => `I uploaded an installer's quote. The quote check found: ${summary} What do you think, and what should I ask the installer?`,
   },
   doc: { needPlan: "Ask the advisor for a plan first.", name: "Your name", landlord: "Landlord's name", make: "Download", cancel: "Cancel" },
+  plus: {
+    buy: "Get Plus · €19",
+    buying: "Opening checkout…",
+    active: "Plus active",
+    left: (n: number) => `${n} quote ${n === 1 ? "check" : "checks"} left`,
+    locked: "Plus feature",
+    required: "The quote checker is part of Plus (€19 one-off, up to 5 quotes, plus the letter, VvE proposal and quote request).",
+    quota: "You've used all quote checks of this Plus purchase.",
+    activated: "Thank you! Plus is now active on this device.",
+    failed: "We couldn't confirm the payment. If you were charged, open the restore link from your receipt or contact us.",
+    restore: "Copy restore link",
+    restoreHint: "Use it to open Plus on another device. Keep it private.",
+    copied: "Link copied",
+    checkoutError: "Checkout couldn't be opened. Please try again.",
+  },
 
   pricing: {
     eyebrow: "Pricing",
@@ -318,6 +333,21 @@ const nl: Dict = {
     quoteMessage: (summary: string) => `Ik heb een offerte geüpload. De offertecheck vond: ${summary} Wat vind jij ervan, en wat moet ik de installateur vragen?`,
   },
   doc: { needPlan: "Vraag de adviseur eerst om een plan.", name: "Je naam", landlord: "Naam verhuurder", make: "Download", cancel: "Annuleer" },
+  plus: {
+    buy: "Neem Plus · €19",
+    buying: "Afrekenen wordt geopend…",
+    active: "Plus actief",
+    left: (n: number) => `nog ${n} ${n === 1 ? "offertecheck" : "offertechecks"}`,
+    locked: "Plus-functie",
+    required: "De offertecheck hoort bij Plus (€19 eenmalig, tot 5 offertes, plus de brief, het VvE-voorstel en de offerteaanvraag).",
+    quota: "Je hebt alle offertechecks van deze Plus-aankoop gebruikt.",
+    activated: "Bedankt! Plus is nu actief op dit apparaat.",
+    failed: "We konden de betaling niet bevestigen. Ben je wel afgeschreven? Open de herstel-link of neem contact op.",
+    restore: "Kopieer herstel-link",
+    restoreHint: "Hiermee open je Plus op een ander apparaat. Deel hem niet.",
+    copied: "Link gekopieerd",
+    checkoutError: "Afrekenen kon niet worden geopend. Probeer het opnieuw.",
+  },
 
   pricing: {
     eyebrow: "Prijzen",

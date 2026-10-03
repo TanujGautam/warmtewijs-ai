@@ -8,6 +8,8 @@ import { describeApiError, hasApiKey, MODEL } from "@/lib/agent";
 import { clientKey, rateLimit } from "@/lib/guardrails";
 import { isLang, type Lang } from "@/lib/i18n";
 import { checkQuote, QUOTE_MEASURES, summarizeReport, type ExtractedQuote } from "@/lib/quote-check";
+import { cookies } from "next/headers";
+import { getPlus, paymentsEnabled, PLUS_COOKIE, consumeQuoteCheck } from "@/lib/plus";
 
 export const maxDuration = 90;
 
@@ -94,6 +96,14 @@ export async function POST(req: Request) {
   const imageType = IMAGE_TYPES.find((t) => t === file.type);
   if (!isPdf && !imageType) return Response.json({ error: "bad_type" }, { status: 415 });
 
+  // The quote checker is a Plus feature once payments are switched on.
+  const plusSession = (await cookies()).get(PLUS_COOKIE)?.value;
+  if (kind === "quote" && paymentsEnabled()) {
+    const plus = await getPlus(plusSession, true);
+    if (!plus.active) return Response.json({ error: "plus_required" }, { status: 402 });
+    if (plus.quoteChecksLeft <= 0) return Response.json({ error: "plus_quota" }, { status: 402 });
+  }
+
   const data = Buffer.from(await file.arrayBuffer()).toString("base64");
   const source: Anthropic.ContentBlockParam = isPdf
     ? { type: "document", source: { type: "base64", media_type: "application/pdf", data } }
@@ -147,6 +157,8 @@ export async function POST(req: Request) {
       lines: raw.lines.map((l) => ({ ...l, quantity: null, material: orNull(l.material), brandModel: orNull(l.brandModel), meldcode: orNull(l.meldcode) })),
     };
     const report = checkQuote(q, lang);
+    // Count the check only after it succeeded.
+    if (paymentsEnabled() && plusSession) await consumeQuoteCheck(plusSession).catch((e) => console.warn("quote check not counted:", e));
     return Response.json({ kind, report, summary: summarizeReport(report, lang) });
   } catch (err) {
     console.error(err);

@@ -5,6 +5,7 @@ import { ADS } from "@/lib/ads";
 import { DEFAULT_ASSUMPTIONS, type PlanResult } from "@/lib/engine";
 import type { Profile } from "@/lib/tools";
 import { useLang } from "../components/LangProvider";
+import type { PlusState } from "../components/usePlus";
 
 export type Step = { id: string; name: string; input?: unknown; preview?: string; isError?: boolean; kind: "skill" | "tool" | "rag" | "mem" | "web"; pending: boolean };
 type DocKind = "plan" | "letter" | "vve" | "rfq";
@@ -17,10 +18,16 @@ export default function SidePanel(props: {
   steps: Step[];
   skillsLoaded: string[];
   busy: boolean;
+  plus: PlusState & { unlocked: boolean };
+  onBuy: () => void;
   onUpload: (kind: "bill" | "quote") => void;
   onReset: (all: boolean) => void;
 }) {
-  const { plan, profile, steps, skillsLoaded, busy, onUpload, onReset } = props;
+  const { plan, profile, steps, skillsLoaded, busy, plus, onBuy, onUpload, onReset } = props;
+  const [copied, setCopied] = useState(false);
+  // Plus tag only matters once payments are on and the user hasn't bought it.
+  const lockTag = plus.enabled && !plus.active ? <span className="proTag">Plus</span> : null;
+  const gated = (fn: () => void) => () => (plus.unlocked ? fn() : onBuy());
   const { lang, t } = useLang();
   const p = t.panel;
   const [temp, setTemp] = useState<number | null>(null);
@@ -98,9 +105,31 @@ export default function SidePanel(props: {
       </section>
 
       <section className="traceSec highlight">
-        <h4><span>{p.quote}</span><span className="proTag">Plus</span></h4>
+        <h4>
+          <span>{p.quote}</span>
+          {plus.active ? <span className="plusOn">{t.plus.active}</span> : <span className="proTag">Plus</span>}
+        </h4>
         <p className="muted">{p.quoteBody}</p>
-        <button className="btn btnSm" disabled={busy} onClick={() => onUpload("quote")}>📄 {p.quoteBtn}</button>
+        {plus.active && <p className="plusLeft">{t.plus.left(plus.quoteChecksLeft)}</p>}
+        {plus.unlocked ? (
+          <button className="btn btnSm" disabled={busy || (plus.active && plus.quoteChecksLeft <= 0)} onClick={() => onUpload("quote")}>📄 {p.quoteBtn}</button>
+        ) : (
+          <button className="btn btnSm btnBuy" onClick={onBuy}>⭐ {t.plus.buy}</button>
+        )}
+        {plus.active && plus.quoteChecksLeft <= 0 && <p className="muted">{t.plus.quota}</p>}
+        {plus.active && plus.restoreUrl && (
+          <p className="restore">
+            <button
+              className="linkBtn"
+              onClick={() => {
+                navigator.clipboard?.writeText(plus.restoreUrl!).then(() => setCopied(true));
+              }}
+            >
+              {copied ? `✓ ${t.plus.copied}` : t.plus.restore}
+            </button>
+            <span className="muted"> · {t.plus.restoreHint}</span>
+          </p>
+        )}
       </section>
 
       {/* Documents */}
@@ -109,7 +138,7 @@ export default function SidePanel(props: {
         {!plan && <p className="muted">{p.docsHint}</p>}
         <div className="docList">
           <button disabled={!plan || !!making} onClick={() => makeDoc("plan")}>⬇ {p.docPlan}</button>
-          <button disabled={!plan || !!making} onClick={() => setLetterOpen((o) => !o)}>⬇ {p.docLetter} <span className="proTag">Plus</span></button>
+          <button disabled={!plan || !!making} onClick={gated(() => setLetterOpen((o) => !o))}>⬇ {p.docLetter} {lockTag}</button>
           {letterOpen && plan && (
             <form
               className="letterForm"
@@ -126,8 +155,8 @@ export default function SidePanel(props: {
               </div>
             </form>
           )}
-          <button disabled={!plan || !!making} onClick={() => makeDoc("vve")}>⬇ {p.docVve} <span className="proTag">Plus</span></button>
-          <button disabled={!plan || !!making} onClick={() => makeDoc("rfq")}>⬇ {p.docRfq} <span className="proTag">Plus</span></button>
+          <button disabled={!plan || !!making} onClick={gated(() => makeDoc("vve"))}>⬇ {p.docVve} {lockTag}</button>
+          <button disabled={!plan || !!making} onClick={gated(() => makeDoc("rfq"))}>⬇ {p.docRfq} {lockTag}</button>
         </div>
       </section>
 

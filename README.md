@@ -38,6 +38,15 @@ Open http://localhost:3000/advisor.
 - `npm run evals`: engine, RAG and agent-routing evals. `EVAL_LLM=1 npm run evals` adds end-to-end Claude checks, which call the API and cost money.
 - `npm run typecheck`, `npm run lint`
 
+## Payments (Warmtewijs Plus)
+
+Plus is a one-off €19 purchase through Stripe Checkout. It unlocks the quote checker (up to 5 quotes), the landlord letter, the VvE proposal and the quote request.
+
+- **Off by default.** Without `STRIPE_SECRET_KEY`, every feature is free and the pricing page says "free during beta".
+- **No database.** The paid Checkout Session is the receipt. Its id is kept in an httpOnly cookie, and the PaymentIntent metadata counts quote checks. The `/api/plus/activate?session_id=…` link restores Plus on another device.
+- **Server-enforced:** the quote checker, which costs API credit. The documents are generated in the browser, so their lock is a UI gate only.
+- **Payment methods** (iDEAL, cards, Bancontact, …) are configured in the Stripe Dashboard; Checkout shows whatever is enabled there.
+
 ## Use from Claude Code (MCP)
 
 ```bash

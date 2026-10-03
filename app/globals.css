@@ -264,3 +264,12 @@ details.traceSec > *:not(summary):first-of-type { margin-top: 10px; }
 .priceFaq summary { cursor: pointer; font-weight: 600; font-size: 17px; }
 .priceFaq p { color: var(--ink-2); line-height: 1.6; margin-top: 8px; }
 @media (max-width: 900px) { .priceGrid { grid-template-columns: 1fr; } }
+
+/* ---------- Plus ---------- */
+.plusOn { font-family: var(--font-mono); font-size: 10px; background: #e5f5ec; color: var(--green); padding: 1px 6px; text-transform: uppercase; letter-spacing: 0.04em; }
+.plusLeft { margin: 6px 0 0; font-weight: 600; font-size: 13.5px; }
+.btnBuy { background: #ff6a3d; }
+.btnBuy:hover { background: var(--ink); }
+.restore { margin: 10px 0 0; font-size: 12px; line-height: 1.5; }
+.notice.banner { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.notice.ok { border-color: var(--green); color: var(--green); background: #f1faf4; }
