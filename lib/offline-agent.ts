@@ -3,7 +3,7 @@
 // so the app is fully demoable and the tool layer is exercised either way.
 import type { AgentEvent } from "./events";
 import { MEASURES, MEASURE_IDS, type MeasureId, type PlanResult } from "./engine";
-import { executeTool, type Profile } from "./tools";
+import { executeTool, type Profile, type ToolOutcome } from "./tools";
 
 const eur = (n: number) => `€${Math.round(n).toLocaleString("nl-NL")}`;
 
@@ -16,9 +16,9 @@ const ROUTES: { skill: string; re: RegExp; query: string }[] = [
   { skill: "insulation", re: /(insulat|isolat|spouw|cavity|roof|dak|floor|vloer|glass|glas|draught|tocht|first|eerst|what should|wat moet)/i, query: "cavity wall insulation" },
 ];
 
-function* call(name: string, input: Record<string, unknown>, profile: Profile, id: string): Generator<AgentEvent, ReturnType<typeof executeTool>> {
+async function* call(name: string, input: Record<string, unknown>, profile: Profile, id: string): AsyncGenerator<AgentEvent, ToolOutcome> {
   yield { type: "tool_call", id, name, input };
-  const out = executeTool(name, input, profile);
+  const out = await executeTool(name, input, profile);
   yield { type: "tool_result", id, name, isError: !!out.isError, preview: out.content.slice(0, 400), ui: out.ui };
   if (out.ui?.kind === "memory") yield { type: "memory", profile: { ...profile } };
   return out;
@@ -37,7 +37,7 @@ export async function* runOfflineAgent(userText: string, profile: Profile): Asyn
 
   // 1. Extract durable facts → memory
   const pc = userText.match(/\b([1-9][0-9]{3}) ?([A-Za-z]{2})\b/);
-  const hn = userText.match(/\b[1-9][0-9]{3} ?[A-Za-z]{2}[ ,]+(?:nr\.?\s*)?([0-9]{1,5}[a-zA-Z]?)\b/) ?? userText.match(/\b(?:number|nummer|nr\.?|huisnummer)\s*([0-9]{1,5}[a-zA-Z]?)\b/i);
+  const hn = userText.match(/\b[1-9][0-9]{3} ?[A-Za-z]{2}[ ,]+(?:nr\.?\s*)?([0-9]{1,5}(?:-?[a-zA-Z0-9]{1,4})?)\b/) ?? userText.match(/\b(?:number|nummer|nr\.?|huisnummer)\s*([0-9]{1,5}[a-zA-Z]?)\b/i);
   if (pc) yield* call("remember", { key: "postcode", value: `${pc[1]} ${pc[2].toUpperCase()}` }, profile, id());
   if (hn) yield* call("remember", { key: "houseNumber", value: hn[1] }, profile, id());
   if (/\b(i rent|we rent|renter|tenant|huurder|huurwoning)\b/i.test(userText)) yield* call("remember", { key: "applicant", value: "renter" }, profile, id());
@@ -71,7 +71,17 @@ export async function* runOfflineAgent(userText: string, profile: Profile): Asyn
   const done = (profile.doneMeasures?.split(",").filter((m) => MEASURE_IDS.includes(m as MeasureId)) ?? []) as MeasureId[];
   const out = yield* call(
     "calculate_plan",
-    { postcode: profile.postcode, house_number: profile.houseNumber, applicant, done_measures: done, ...(profile.budget && { budget: Number(profile.budget) }) },
+    {
+      postcode: profile.postcode,
+      house_number: profile.houseNumber,
+      applicant,
+      done_measures: done,
+      ...(profile.budget && { budget: Number(profile.budget) }),
+      ...(profile.houseType && { house_type: profile.houseType }),
+      ...(profile.buildYear && { build_year: Number(profile.buildYear) }),
+      ...(profile.floorArea && { floor_area: Number(profile.floorArea) }),
+      ...(profile.label && { label: profile.label }),
+    },
     profile,
     id(),
   );
@@ -83,7 +93,7 @@ export async function* runOfflineAgent(userText: string, profile: Profile): Asyn
   const rec = plan.measures.filter((m) => m.status === "recommended");
   const h = plan.house;
 
-  let text = `**${h.type}, built ${h.buildYear}, ${h.floorArea} m², label ${h.label}.** `;
+  let text = `**${h.address ?? `${h.postcode} ${h.houseNumber}`}: ${h.type}, built ${h.buildYear}, ${h.floorArea} m², label ${h.label}${h.labelSource?.startsWith("estimated") ? " (estimated)" : ""}.** `;
   if (applicant === "renter") text += "You rent, so structural work is your landlord's call — here's what to ask for.\n\n";
   else text += rec.length ? `Here's the order that pays best:\n\n` : "Good news: there's little left that pays back. ";
   if (rec.length) {
@@ -94,8 +104,10 @@ export async function* runOfflineAgent(userText: string, profile: Profile): Asyn
   const later = plan.measures.filter((m) => m.status === "later");
   if (later.length) text += `**Not yet:** ${later.map((m) => `${m.name} — ${m.reason}`).join(" ")}\n\n`;
 
-  if (route) {
-    const k = yield* call("search_knowledge", { query: route.query + " " + userText.slice(0, 100) }, profile, id());
+  // Ground the explanation in the top recommendation for *this* house, not just the topic of the question.
+  const topic = route && route.skill !== "insulation" ? route.query : rec[0] ? `${rec[0].name} ${rec[0].dutch}` : route?.query;
+  if (topic) {
+    const k = yield* call("search_knowledge", { query: topic }, profile, id());
     if (k.ui?.kind === "sources" && k.ui.hits[0]) {
       const hit = k.ui.hits[0];
       text += `**${hit.heading}:** ${hit.text.split("\n")[0]} [${hit.docId}]\n\n`;

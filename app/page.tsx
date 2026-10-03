@@ -84,7 +84,7 @@ export default function Home() {
         </section>
       </main>
       <footer className="footer">
-        <span>Warmtewijs AI · demo app · house data is a stub of BAG/EP-Online · figures are indicative</span>
+        <span>Warmtewijs AI · house data from BAG (Kadaster) via PDOK and EP-Online · figures are indicative</span>
         <span>
           <Link href="/skills">Skills</Link> · <a href="/api/skills">API</a>
         </span>

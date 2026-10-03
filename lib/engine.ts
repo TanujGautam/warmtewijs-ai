@@ -14,6 +14,10 @@ export interface House {
   floorArea: number;
   label: Label;
   source: string;
+  address?: string;
+  labelSource?: string;
+  typeSource?: string;
+  use?: string;
 }
 
 export interface Assumptions {
@@ -25,7 +29,8 @@ export interface Assumptions {
 export const DEFAULT_ASSUMPTIONS: Assumptions = { gasPrice: 1.3, electricityPrice: 0.3 };
 
 const LABELS: Label[] = ["G", "F", "E", "D", "C", "B", "A"];
-const TYPES: HouseType[] = ["rijtjeshuis", "hoekwoning", "twee-onder-een-kap", "vrijstaand", "appartement"];
+export const HOUSE_TYPES: HouseType[] = ["rijtjeshuis", "hoekwoning", "twee-onder-een-kap", "vrijstaand", "appartement"];
+export const LABEL_VALUES = ["A", "B", "C", "D", "E", "F", "G"] as const;
 const CO2_PER_M3_GAS = 1.78; // kg
 const CO2_PER_KWH = 0.33; // kg, grid average
 
@@ -41,34 +46,21 @@ export const MEASURES: Record<MeasureId, { name: string; dutch: string; category
 
 export const MEASURE_IDS = Object.keys(MEASURES) as MeasureId[];
 
-function hash(s: string): number {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
+export interface HouseOverrides {
+  type?: HouseType;
+  buildYear?: number;
+  floorArea?: number;
+  label?: Label;
 }
 
-export function normalizePostcode(pc: string): string | null {
-  const m = pc.toUpperCase().replace(/\s+/g, "").match(/^([1-9][0-9]{3})([A-Z]{2})$/);
-  return m ? `${m[1]} ${m[2]}` : null;
-}
-
-/** Stub of a BAG + EP-Online lookup: deterministic per address, plausible for NL housing stock. */
-export function lookupHouse(postcode: string, houseNumber: string): House | { error: string } {
-  const pc = normalizePostcode(postcode);
-  if (!pc) return { error: `"${postcode}" is not a valid Dutch postcode (expected e.g. 1012 AB).` };
-  const num = String(houseNumber).trim();
-  if (!/^[0-9]{1,5}[a-zA-Z]?(-[0-9a-zA-Z]{1,4})?$/.test(num)) return { error: `"${houseNumber}" is not a valid house number.` };
-  const h = hash(`${pc}|${num.toLowerCase()}`);
-  const buildYear = 1925 + (h % 96); // 1925–2020
-  const type = TYPES[(h >>> 7) % TYPES.length];
-  const baseArea = { rijtjeshuis: 110, hoekwoning: 120, "twee-onder-een-kap": 140, vrijstaand: 170, appartement: 75 }[type];
-  const floorArea = baseArea + ((h >>> 11) % 30) - 10;
-  const ageIndex = buildYear < 1945 ? 0 : buildYear < 1965 ? 1 : buildYear < 1975 ? 2 : buildYear < 1992 ? 3 : buildYear < 2006 ? 4 : 6;
-  const label = LABELS[Math.min(6, Math.max(0, ageIndex + (((h >>> 15) % 3) - 1)))];
-  return { postcode: pc, houseNumber: num, buildYear, type, floorArea, label, source: "demo-stub (BAG / EP-Online)" };
+/** Apply corrections from the user (they know their house better than the register). */
+export function applyOverrides(house: House, o: HouseOverrides): House {
+  const out = { ...house };
+  if (o.type) [out.type, out.typeSource] = [o.type, "corrected by user"];
+  if (o.buildYear) out.buildYear = o.buildYear;
+  if (o.floorArea) out.floorArea = o.floorArea;
+  if (o.label) [out.label, out.labelSource] = [o.label, "provided by user"];
+  return out;
 }
 
 function surfaces(house: House) {
@@ -300,6 +292,7 @@ export function calculatePlan(
   const steps = final.filter((r) => r.status === "recommended").reduce((s, r) => s + SPECS[r.id].labelSteps, 0);
   const labelTo = LABELS[Math.min(6, LABELS.indexOf(house.label) + Math.floor(steps))];
   if (applicant === "renter") notes.push("You rent: structural measures are your landlord's decision. Use this plan to make your request concrete.");
+  if (house.labelSource?.startsWith("estimated")) notes.push(`Energy label ${house.label} is estimated from the build year — tell us your actual label for a sharper plan.`);
   if (a.gasUseM3 === undefined) notes.push(`Gas use estimated at ${gasUse} m³/yr from label and floor area — enter your actual use for a sharper plan.`);
   notes.push("Indicative 2026 figures. Get two quotes and check RVO before you sign.");
 

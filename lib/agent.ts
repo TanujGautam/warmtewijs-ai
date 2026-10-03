@@ -95,7 +95,7 @@ export async function* runClaudeAgent(history: Msg[], userText: string, profile:
     const results: Anthropic.Beta.BetaToolResultBlockParam[] = [];
     for (const tu of toolUses) {
       yield { type: "tool_call", id: tu.id, name: tu.name, input: tu.input };
-      const out = executeTool(tu.name, tu.input, profile);
+      const out = await executeTool(tu.name, tu.input, profile);
       yield { type: "tool_result", id: tu.id, name: tu.name, isError: !!out.isError, preview: preview(out.content), ui: out.ui };
       if (out.ui?.kind === "memory") yield { type: "memory", profile: { ...profile } };
       results.push({ type: "tool_result", tool_use_id: tu.id, content: out.content, ...(out.isError && { is_error: true }) });

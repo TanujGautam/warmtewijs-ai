@@ -3,7 +3,8 @@
 //   2. rag     — retrieval: does the right source come back in the top 3? (always run)
 //   3. agent   — end-to-end behaviour of the Claude agent (only with EVAL_LLM=1 and an API key; costs money)
 // Run: npm run evals            (or EVAL_LLM=1 npm run evals)
-import { calculatePlan, lookupHouse, type House } from "../lib/engine";
+import { calculatePlan, type House } from "../lib/engine";
+import { lookupHouse, parseHouseNumber } from "../lib/registers";
 import { search } from "../lib/rag";
 import { runOfflineAgent } from "../lib/offline-agent";
 import { runClaudeAgent, hasApiKey } from "../lib/agent";
@@ -28,8 +29,19 @@ const engine: Case[] = [
       return spent <= 4000 || `spent ${spent}`;
     } },
   { name: "label improves when measures are recommended", run: () => { const p = calculatePlan(house({ label: "E", buildYear: 1955 })); return p.labelTo < p.labelFrom || `${p.labelFrom}→${p.labelTo}`; } },
-  { name: "lookup is deterministic", run: () => JSON.stringify(lookupHouse("1072ab", "14")) === JSON.stringify(lookupHouse("1072 AB", "14")) },
-  { name: "invalid postcode rejected", run: () => "error" in lookupHouse("0000", "1") },
+  { name: "house number parsing (12, 12A, 12-2, 12 h)", run: () => JSON.stringify(["12", "12A", "12-2", "12 h"].map((n) => parseHouseNumber(n))) === JSON.stringify([{ number: 12, suffix: "" }, { number: 12, suffix: "A" }, { number: 12, suffix: "2" }, { number: 12, suffix: "H" }]) },
+];
+
+// Live public registers (PDOK / BAG). Skip with EVAL_OFFLINE=1.
+const registers: Case[] = [
+  { name: "BAG: invalid postcode rejected", run: async () => "error" in (await lookupHouse("0000", "1")) },
+  { name: "BAG: Stadhouderskade 52-H is an 1880 apartment of 32 m²", run: async () => {
+      const h = await lookupHouse("1072 AB", "52-H");
+      if (!("buildYear" in h)) return JSON.stringify(h);
+      return (h.buildYear === 1880 && h.floorArea === 32 && h.type === "appartement" && h.address?.includes("Stadhouderskade 52-H")) || JSON.stringify(h);
+    } },
+  { name: "BAG: number with several units asks which one", run: async () => { const h = await lookupHouse("1072AB", "52"); return "ambiguous" in h || JSON.stringify(h); } },
+  { name: "BAG: unknown house number is an error, not made-up data", run: async () => "error" in (await lookupHouse("1072AB", "99999")) },
 ];
 
 const rag: [string, string][] = [
@@ -55,7 +67,7 @@ async function collect(gen: AsyncGenerator<AgentEvent>) {
 const offline: Case[] = [
   { name: "offline: asks for address when unknown", run: async () => (await collect(runOfflineAgent("What should I insulate first?", {}))).text.toLowerCase().includes("postcode") },
   { name: "offline: renter routes to renters skill", run: async () => { const r = await collect(runOfflineAgent("I rent my place at 1072 AB 14, landlord won't help", {})); return r.events.some((e) => e.type === "tool_result" && e.ui?.kind === "skill" && e.ui.name === "renters") || r.tools.join(); } },
-  { name: "offline: address → calculate_plan", run: async () => (await collect(runOfflineAgent("1072 AB 14, what should I do?", {}))).tools.includes("calculate_plan") },
+  { name: "offline: address → calculate_plan with the real address", run: async () => { const r = await collect(runOfflineAgent("1072 AB 52-H, what should I do?", {})); return (r.tools.includes("calculate_plan") && r.text.includes("Stadhouderskade 52-H")) || r.text.slice(0, 200); } },
 ];
 
 const agent: Case[] = [
@@ -66,7 +78,8 @@ const agent: Case[] = [
 ];
 
 async function main() {
-  const suites: [string, Case[]][] = [["engine", engine], ["rag", ragCases], ["offline agent", offline]];
+  const suites: [string, Case[]][] = [["engine", engine], ["rag", ragCases]];
+  if (process.env.EVAL_OFFLINE !== "1") suites.push(["registers (live)", registers], ["offline agent", offline]);
   if (process.env.EVAL_LLM === "1") {
     if (hasApiKey()) suites.push(["claude agent", agent]);
     else console.log("EVAL_LLM=1 but no ANTHROPIC_API_KEY — skipping agent evals.");

@@ -48,4 +48,4 @@ claude mcp add --transport http warmtewijs https://warmtewijs-ai.vercel.app/api/
 
 Deployed on Vercel. Set `ANTHROPIC_API_KEY` in the project's environment variables, then redeploy.
 
-House data is a deterministic stub of the BAG/EP-Online registers, and the subsidy and price figures are indicative. This is a demo; it is not financial advice.
+House data comes from the public BAG register (Kadaster, via PDOK), which needs no key. For registered energy labels, set `EP_ONLINE_API_KEY` (free from RVO at ep-online.nl). Without it, the label is estimated from the build year and marked as estimated. Subsidy and price figures are indicative. This is a demo; it is not financial advice.

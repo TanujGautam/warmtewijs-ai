@@ -308,8 +308,8 @@ function PlanCard({ plan }: { plan: PlanResult }) {
   return (
     <div className="plan">
       <div className="planHead">
-        <span>Plan · {h.type} {h.buildYear} · {h.floorArea} m²</span>
-        <span>Label {plan.labelFrom} → {plan.labelTo}</span>
+        <span>{h.address ?? `${h.postcode} ${h.houseNumber}`} · {h.type} {h.buildYear} · {h.floorArea} m²</span>
+        <span>Label {plan.labelFrom}{h.labelSource?.startsWith("estimated") ? " (est.)" : ""} → {plan.labelTo}</span>
       </div>
       <div className="planStats">
         <div><small>Saving / year</small><strong>{eur(plan.totals.savingPerYear)}</strong></div>
@@ -327,7 +327,7 @@ function PlanCard({ plan }: { plan: PlanResult }) {
         </div>
       ))}
       <div className="planRow" style={{ gridTemplateColumns: "1fr" }}>
-        <span className="sub">Assumes gas €{plan.assumptions.gasPrice.toFixed(2)}/m³, electricity €{plan.assumptions.electricityPrice.toFixed(2)}/kWh, {plan.assumptions.gasUseM3} m³/yr. House data: {h.source}.</span>
+        <span className="sub">Assumes gas €{plan.assumptions.gasPrice.toFixed(2)}/m³, electricity €{plan.assumptions.electricityPrice.toFixed(2)}/kWh, {plan.assumptions.gasUseM3} m³/yr. House data: {h.source}. Label: {h.labelSource ?? "register"}. Type: {h.typeSource ?? "register"}. Wrong? Just tell the advisor.</span>
       </div>
     </div>
   );

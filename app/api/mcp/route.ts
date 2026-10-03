@@ -18,7 +18,7 @@ function error(id: RpcRequest["id"], code: number, message: string) {
   return { jsonrpc: "2.0", id: id ?? null, error: { code, message } };
 }
 
-function handle(msg: RpcRequest) {
+async function handle(msg: RpcRequest) {
   switch (msg.method) {
     case "initialize":
       return result(msg.id, {
@@ -34,7 +34,7 @@ function handle(msg: RpcRequest) {
     case "tools/call": {
       const name = String(msg.params?.name ?? "");
       if (!MCP_TOOLS.some((t) => t.name === name)) return error(msg.id, -32602, `Unknown tool: ${name}`);
-      const out = executeTool(name, msg.params?.arguments ?? {}, {});
+      const out = await executeTool(name, msg.params?.arguments ?? {}, {});
       return result(msg.id, { content: [{ type: "text", text: out.content }], isError: !!out.isError });
     }
     case "prompts/list":
@@ -59,7 +59,7 @@ export async function POST(req: Request) {
   }
   const batch = Array.isArray(body) ? body : [body];
   // Notifications (no id) get no response body.
-  const responses = batch.filter((m) => m.id !== undefined && m.id !== null).map(handle);
+  const responses = await Promise.all(batch.filter((m) => m.id !== undefined && m.id !== null).map(handle));
   if (!responses.length) return new Response(null, { status: 202 });
   return Response.json(Array.isArray(body) ? responses : responses[0], { headers: { "MCP-Protocol-Version": PROTOCOL_VERSION } });
 }
