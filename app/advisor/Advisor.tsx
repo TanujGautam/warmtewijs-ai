@@ -390,7 +390,10 @@ export default function Advisor() {
               <button className="btn" disabled={busy || !input.trim()}>{busy ? "…" : t.advisor.send}</button>
             </form>
             <input ref={fileRef} type="file" accept="application/pdf,image/*" hidden onChange={onFile} />
-            <div className="hint">{t.advisor.hint}</div>
+            <div className="hint">
+              {t.advisor.hint}{" "}
+              <a href="/privacy">Privacy</a> · <a href="/terms">{lang === "nl" ? "Voorwaarden" : "Terms"}</a>
+            </div>
           </div>
         </div>
       </section>

@@ -194,7 +194,7 @@ export default async function Home() {
           <span className={s.footerBrand}><i /> Warmtewijs AI</span>
           <span>{t.footer.data}</span>
           <span>
-            <Link href="/pricing">{t.nav.pricing}</Link> · <Link href="/advisor">{t.nav.advisor}</Link> · <Link href="/skills">Skills</Link> ·{" "}
+            <Link href="/pricing">{t.nav.pricing}</Link> · <Link href="/advisor">{t.nav.advisor}</Link> · <Link href="/terms">{nl ? "Voorwaarden" : "Terms"}</Link> · <Link href="/privacy">Privacy</Link> · <Link href="/skills">Skills</Link> ·{" "}
             <a href="https://github.com/TanujGautam/warmtewijs-ai">GitHub</a>
           </span>
         </div>

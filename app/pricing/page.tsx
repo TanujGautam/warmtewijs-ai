@@ -54,6 +54,10 @@ export default async function Pricing() {
               })}
             </div>
 
+            <p className="legalLinks">
+              <Link href="/terms">{lang === "nl" ? "Algemene voorwaarden" : "Terms of service"}</Link> · <Link href="/privacy">{lang === "nl" ? "Privacyverklaring" : "Privacy statement"}</Link>
+            </p>
+
             <div className="priceFaq">
               <h2 className={s.h2} style={{ fontSize: 28 }}>{p.faqTitle}</h2>
               {p.faq.map(([q, a]) => (

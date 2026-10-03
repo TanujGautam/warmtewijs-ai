@@ -85,8 +85,8 @@ export async function createCheckout(opts: { origin: string; lang: "en" | "nl"; 
     custom_text: {
       submit: {
         message: nl
-          ? "Plus is digitale inhoud die direct na betaling start. Door te betalen stem je daarmee in en vervalt je herroepingsrecht van 14 dagen."
-          : "Plus is digital content that starts immediately after payment. By paying you agree to this and waive the 14-day right of withdrawal.",
+          ? `Plus is digitale inhoud die direct na betaling start. Door te betalen stem je daarmee in en vervalt je herroepingsrecht van 14 dagen. Voorwaarden: ${opts.origin}/terms`
+          : `Plus is digital content that starts immediately after payment. By paying you agree to this and waive the 14-day right of withdrawal. Terms: ${opts.origin}/terms`,
       },
     },
     success_url: `${opts.origin}/api/plus/activate?session_id={CHECKOUT_SESSION_ID}`,

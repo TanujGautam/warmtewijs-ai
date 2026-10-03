@@ -273,3 +273,14 @@ details.traceSec > *:not(summary):first-of-type { margin-top: 10px; }
 .restore { margin: 10px 0 0; font-size: 12px; line-height: 1.5; }
 .notice.banner { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
 .notice.ok { border-color: var(--green); color: var(--green); background: #f1faf4; }
+
+/* ---------- Legal pages ---------- */
+.legal { max-width: 760px; padding-top: 48px; padding-bottom: 80px; }
+.legal h1 { font-size: clamp(32px, 4vw, 44px); letter-spacing: -0.03em; margin-bottom: 16px; }
+.legal h2 { font-size: 19px; letter-spacing: -0.01em; margin: 32px 0 10px; }
+.legal p { color: var(--ink-2); line-height: 1.65; margin: 0 0 10px; }
+.legalIntro { font-size: 17px; }
+.legalDraft { margin-bottom: 28px; border-color: var(--amber); color: var(--amber); background: #fff8ec; }
+.legalNav { margin-top: 48px !important; font-size: 14px; }
+.legalLinks { font-size: 12px; margin-top: 6px; }
+.legalLinks a { color: var(--ink-3); text-decoration: underline; }
