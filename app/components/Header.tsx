@@ -9,6 +9,7 @@ export default function Header() {
         <span className="brandTag">AI</span>
       </Link>
       <nav className="nav">
+        <Link href="/#how">How it works</Link>
         <Link href="/#under-the-hood">Under the hood</Link>
         <Link href="/skills">Skills</Link>
         <Link href="/#mcp">MCP</Link>

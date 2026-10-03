@@ -178,3 +178,8 @@ button, input, textarea { font: inherit; }
   .chatScroll, .composer { padding-left: 16px; padding-right: 16px; }
   .nav { gap: 14px; }
 }
+
+@media (max-width: 640px) {
+  .nav a:not(.btn) { display: none; }
+  .header { flex-wrap: nowrap; }
+}

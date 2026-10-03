@@ -51,12 +51,33 @@ export default function Advisor() {
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const started = useRef(false);
+
   useEffect(() => {
+    if (started.current) return; // StrictMode runs effects twice in dev; never double-send
+    started.current = true;
     // Restore persisted state after mount (localStorage is unavailable during SSR).
-    setProfile(load(STORE.profile, {}));
-    setHistory(load(STORE.history, []));
-    setTurns(load<Turn[]>(STORE.turns, []).map((t) => (t.role === "bot" ? { ...t, live: false } : t)));
+    const savedProfile = load<Profile>(STORE.profile, {});
+    const q = new URLSearchParams(window.location.search).get("q")?.slice(0, 2000);
+    if (q) {
+      // Arrived from the landing page with an address: start a fresh conversation about that house,
+      // keeping general facts (owner/renter, budget) but not the previous house's details.
+      const fresh: Profile = { ...savedProfile };
+      for (const k of ["postcode", "houseNumber", "houseType", "buildYear", "floorArea", "label", "doneMeasures"] as const) delete fresh[k];
+      setProfile(fresh);
+      save(STORE.profile, fresh);
+      save(STORE.history, []);
+      save(STORE.turns, []);
+      window.history.replaceState(null, "", "/advisor");
+      send(q, { history: [], profile: fresh });
+    } else {
+      setProfile(savedProfile);
+      setHistory(load(STORE.history, []));
+      setTurns(load<Turn[]>(STORE.turns, []).map((t) => (t.role === "bot" ? { ...t, live: false } : t)));
+    }
     fetch("/api/chat").then((r) => r.json()).then((d) => setMode((m) => m ?? d)).catch(() => {});
+    // Mount-only by design: restore once, and auto-send the landing-page question at most once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -72,7 +93,7 @@ export default function Advisor() {
     });
   }
 
-  async function send(text: string) {
+  async function send(text: string, start?: { history: unknown[]; profile: Profile }) {
     const message = text.trim();
     if (!message || busy) return;
     setBusy(true);
@@ -81,9 +102,9 @@ export default function Advisor() {
     setTurns((ts) => [...ts, { role: "user", text: message }, { role: "bot", text: "", thinking: "", plans: [], notices: [], live: true }]);
 
     let finalHistory: unknown[] | null = null;
-    let latestProfile = profile;
+    let latestProfile = start?.profile ?? profile;
     try {
-      const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, history, profile }) });
+      const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message, history: start?.history ?? history, profile: start?.profile ?? profile }) });
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
         patchBot((t) => ({ ...t, notices: [...t.notices, { kind: "err", text: err.error ?? "Request failed" }] }));
